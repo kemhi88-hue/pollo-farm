@@ -1,15 +1,29 @@
 cat > ~/pollo_farm.sh << 'EOF'
 #!/bin/bash
+
+# ================== Variables ==================
 CMD="${CMD:-}"
 key="${key:-}"
+INVITE="${INVITE:-abc123}"
+PACKAGE="ai.pollo.ai"
+PASS="111111"
+
+# ================== Colors ==================
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+# ================== Decode CMD/Key ==================
 if [ -n "$CMD" ]; then
     CMD=$(echo "$CMD" | base64 --decode)
 fi
-
 if [ -n "$key" ]; then
     key=$(echo "$key" | base64 --decode)
 fi
 
+# ================== Parse SSH info ==================
 if [ -n "$CMD" ]; then
     SSH_USER=$(echo "$CMD" | grep -oP '\S+@\S+' | cut -d@ -f1)
     SSH_HOST=$(echo "$CMD" | grep -oP '\S+@\S+' | cut -d@ -f2)
@@ -19,26 +33,15 @@ if [ -n "$CMD" ]; then
     SERIAL="localhost:${LOCAL_PORT}"
 fi
 
-PACKAGE="ai.pollo.ai"
-PASS="111111"
-INVITE="${INVITE:-abc123}"
-
-
-
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-CYAN='\033[0;36m'
-NC='\033[0m'
-
+# ================== Dependencies ==================
 install_deps() {
     echo -e "${CYAN}[*] Check deps...${NC}"
     local NEED=""
-    command -v ssh     >/dev/null 2>&1 || NEED="$NEED openssh-client"
+    command -v ssh >/dev/null 2>&1 || NEED="$NEED openssh-client"
     command -v sshpass >/dev/null 2>&1 || NEED="$NEED sshpass"
-    command -v adb     >/dev/null 2>&1 || NEED="$NEED adb"
-    command -v jq      >/dev/null 2>&1 || NEED="$NEED jq"
-    command -v curl    >/dev/null 2>&1 || NEED="$NEED curl"
+    command -v adb >/dev/null 2>&1 || NEED="$NEED adb"
+    command -v jq >/dev/null 2>&1 || NEED="$NEED jq"
+    command -v curl >/dev/null 2>&1 || NEED="$NEED curl"
     if [ -n "$NEED" ]; then
         echo -e "${YELLOW}[!] Installing:$NEED${NC}"
         sudo apt-get update -y >/dev/null 2>&1
@@ -47,6 +50,7 @@ install_deps() {
     echo -e "${GREEN}[OK] Deps ready${NC}"
 }
 
+# ================== SSH Tunnel ==================
 kill_tunnel() {
     pkill -f "ssh.*${SSH_HOST}.*${SSH_PORT}" 2>/dev/null
     adb kill-server 2>/dev/null
@@ -57,7 +61,7 @@ start_tunnel() {
     echo -e "${CYAN}[*] SSH tunnel...${NC}"
     mkdir -p ~/.ssh && chmod 700 ~/.ssh
     ssh-keyscan -p $SSH_PORT $SSH_HOST >> ~/.ssh/known_hosts 2>/dev/null
-    sshpass -p "$SSH_PASS" ssh \
+    sshpass -p "$key" ssh \
         -oHostKeyAlgorithms=+ssh-rsa \
         -oStrictHostKeyChecking=no \
         -oServerAliveInterval=30 \
@@ -89,6 +93,7 @@ ensure_tunnel() {
     fi
 }
 
+# ================== ADB ==================
 connect_adb() {
     echo -e "${CYAN}[*] ADB connect...${NC}"
     adb kill-server 2>/dev/null
@@ -136,6 +141,24 @@ focus_and_type() {
     sleep 0.3
 }
 
+# ================== APK Install ==================
+echo -e "${CYAN}[*] Installing Pollo.ai APK...${NC}"
+TMP_APK="/tmp/Pollo.ai_Android.apk"
+curl -L -o "$TMP_APK" "https://videocdn.pollo.ai/app/android/Pollo.ai_Android.apk"
+if [ $? -ne 0 ] || [ ! -f "$TMP_APK" ]; then
+    echo -e "${RED}[FAIL] Download APK${NC}"
+    exit 1
+fi
+
+adb -s "$SERIAL" install -r "$TMP_APK" >/dev/null 2>&1
+if [ $? -eq 0 ]; then
+    echo -e "${GREEN}[OK] APK installed${NC}"
+else
+    echo -e "${RED}[FAIL] APK install${NC}"
+    exit 1
+fi
+
+# ================== Mail/OTP ==================
 create_mail() {
     echo -e "${CYAN}[*] Creating email...${NC}"
     local retry=0
@@ -168,7 +191,6 @@ create_mail() {
         sleep 2
     done
     [ -z "$CHECK" ] || [ "$CHECK" = "null" ] && echo -e "${RED}[FAIL] Create email${NC}" && return 1
-
     echo -e "${GREEN}[OK] $EMAIL${NC}"
     sleep 1
 
@@ -209,8 +231,6 @@ get_otp() {
         local TOTAL=$(echo "$MSGS" | jq -r '.["hydra:totalItems"] // 0' 2>/dev/null)
         [ "$TOTAL" = "0" ] || [ -z "$TOTAL" ] || [ "$TOTAL" = "null" ] && sleep 3 && continue
 
-        echo -e "  ${GREEN}📨 $TOTAL email(s)${NC}" >&2
-
         local MSG_ID=$(echo "$MSGS" | jq -r '.["hydra:member"] | sort_by(.createdAt) | reverse | .[0].id // empty' 2>/dev/null)
         [ -z "$MSG_ID" ] || [ "$MSG_ID" = "null" ] && sleep 3 && continue
 
@@ -219,24 +239,8 @@ get_otp() {
             "https://api.mail.tm/messages/$MSG_ID" 2>/dev/null)
         [ -z "$FULL" ] && sleep 3 && continue
 
-        local F_SUB=$(echo "$FULL" | jq -r '.subject // ""' 2>/dev/null)
         local F_TXT=$(echo "$FULL" | jq -r '.text // ""' 2>/dev/null)
-        local F_INT=$(echo "$FULL" | jq -r '.intro // ""' 2>/dev/null)
-        local F_HTM=$(echo "$FULL" | jq -r '.html // ""' 2>/dev/null)
-        local F_HC=""
-        [ -n "$F_HTM" ] && [ "$F_HTM" != "null" ] && \
-            F_HC=$(echo "$F_HTM" | sed 's/<[^>]*>//g; s/&nbsp;/ /g; s/&#[0-9]*;//g')
-
-        echo -e "  ${CYAN}Subj: $F_SUB${NC}" >&2
-
-        local ALL="$F_SUB $F_INT $F_TXT $F_HC"
-        local OTP=""
-
-        OTP=$(echo "$ALL" | grep -oiE '(code|otp|verification|verify|is)[^0-9]{0,20}[0-9]{4,6}' \
-            | grep -oE '[0-9]{4,6}' | head -1)
-        [ -z "$OTP" ] && OTP=$(echo "$ALL" | grep -oE '\b[0-9]{6}\b' | head -1)
-        [ -z "$OTP" ] && OTP=$(echo "$ALL" | grep -oE '\b[0-9]{4}\b' | head -1)
-
+        local OTP=$(echo "$F_TXT" | grep -oE '\b[0-9]{4,6}\b' | head -1)
         OTP=$(echo "$OTP" | tr -d '\r\n\t ')
 
         if [[ "$OTP" =~ ^[0-9]{4,6}$ ]]; then
@@ -244,8 +248,6 @@ get_otp() {
             echo "$OTP"
             return 0
         fi
-
-        echo -e "  ${YELLOW}No OTP yet, text: ${F_TXT:0:100}${NC}" >&2
         sleep 3
     done
 
@@ -254,44 +256,24 @@ get_otp() {
     return 1
 }
 
+# ================== run_one ==================
 run_one() {
-    echo -e "\n${YELLOW}══════════════════════════════${NC}"
-    echo -e "${YELLOW}  RUN #$1${NC}"
-    echo -e "${YELLOW}══════════════════════════════${NC}"
-
     ensure_tunnel || return 1
 
-    echo -e "${CYAN}[1] Clear${NC}"
     adb -s $SERIAL shell pm clear $PACKAGE >/dev/null 2>&1
     sleep 2
 
-    echo -e "${CYAN}[2] Open${NC}"
     adb -s $SERIAL shell monkey -p $PACKAGE -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
     sleep 12
 
-    echo -e "${CYAN}[3] Navigate${NC}"
-    tap 110 457 "menu";       sleep 3
-    tap 623 1232 "login/reg"; sleep 2
-    tap 360 725 "login";      sleep 1
-    tap 94 1210 "register";   sleep 1
-    tap 283 1100 "next";      sleep 1
-    tap 489 452 "next";       sleep 1
-    tap 258 556 "email";      sleep 1
-
-    echo -e "${CYAN}[4] Mail${NC}"
     create_mail || return 1
-
     focus_and_type 258 556 "$EMAIL" "email"
     sleep 1
     tap 350 670 "GetOTP"
-    echo -e "${CYAN}[*] Wait 8s...${NC}"
     sleep 8
 
-    echo -e "${CYAN}[5] OTP${NC}"
     OTP=$(get_otp)
     OTP=$(echo "$OTP" | tr -d '\r\n\t ')
-    echo -e "${CYAN}[*] Got: [$OTP]${NC}"
-
     if [[ ! "$OTP" =~ ^[0-9]{4,6}$ ]]; then
         echo -e "${RED}[FAIL] Bad OTP: [$OTP]${NC}"
         return 1
@@ -305,69 +287,35 @@ run_one() {
     sleep 1
     tap 340 650 "submit"; sleep 5
 
-    echo -e "${CYAN}[6] Info${NC}"
     focus_and_type 210 580 "Minh" "first"
-    sleep 1
     focus_and_type 505 567 "Nguyen" "last"
-    sleep 1
     focus_and_type 154 711 "$PASS" "pass"
     sleep 2
     tap 324 843 "CREATE"; sleep 5
 
-    echo -e "${CYAN}[7] Login${NC}"
-    tap 352 457 "email"; sleep 2
-    focus_and_type 209 677 "$PASS" "pass"
-    sleep 1
-    tap 361 783 "submit"; sleep 4
-
-    echo -e "${CYAN}[8] Skip${NC}"
-    tap 444 85 "skip1"; sleep 2
-    tap 580 1018 "skip2"; sleep 2
-
-    echo -e "${CYAN}[9] Scroll${NC}"
-    adb -s $SERIAL shell input swipe 500 1000 500 200 1000
-    sleep 2
-
-    echo -e "${CYAN}[10] Invite${NC}"
     focus_and_type 173 973 "$INVITE" "invite"
-    sleep 1
     adb -s $SERIAL shell input keyevent 66
     sleep 1
-
-    echo -e "${CYAN}[11] Redeem${NC}"
     tap 548 686 "REDEEM"; sleep 3
 
-    echo -e "${GREEN}╔═══════════════════════════╗${NC}"
-    echo -e "${GREEN}║ ✅ SUCCESS #$1${NC}"
-    echo -e "${GREEN}║ $EMAIL${NC}"
-    echo -e "${GREEN}╚═══════════════════════════╝${NC}"
-
-    echo "$(date '+%Y-%m-%d %H:%M:%S') | #$1 | $EMAIL" >> ~/success.txt
+    echo "$(date '+%Y-%m-%d %H:%M:%S') | $EMAIL" >> ~/success.txt
+    echo -e "${GREEN}[OK] Run completed${NC}"
     return 0
 }
 
+# ================== Main ==================
 clear
-echo -e "${GREEN}╔═══════════════════════════════╗${NC}"
-echo -e "${GREEN}║  🐔 POLLO FARM v3.0 🐔       ║${NC}"
-echo -e "${GREEN}║  SSH: ${SSH_HOST}:${SSH_PORT}  ║${NC}"
-echo -e "${GREEN}║  ADB: ${SERIAL}        ║${NC}"
-echo -e "${GREEN}╚═══════════════════════════════╝${NC}"
-echo ""
+echo -e "${GREEN}╔════════ POLLO FARM v3.0 ════════╗${NC}"
+echo -e "${GREEN}║ SSH: ${SSH_HOST}:${SSH_PORT}           ║${NC}"
+echo -e "${GREEN}║ ADB: ${SERIAL}                       ║${NC}"
+echo -e "${GREEN}╚═══════════════════════════════════╝${NC}"
 
 install_deps
-
-echo -e "${CYAN}[*] Test mail.tm...${NC}"
-curl -s --max-time 10 https://api.mail.tm/domains >/dev/null 2>&1 || {
-    echo -e "${RED}[FAIL] mail.tm${NC}"; exit 1
-}
-echo -e "${GREEN}[OK] mail.tm${NC}"
-
 kill_tunnel
 start_tunnel || exit 1
 connect_adb || exit 1
 
 echo -e "\n${GREEN}[🚀] Starting farm...${NC}\n"
-
 COUNT=1 OK=0 FAIL=0
 
 while true; do
@@ -384,4 +332,5 @@ while true; do
 done
 EOF
 
+# Chạy script
 bash ~/pollo_farm.sh
