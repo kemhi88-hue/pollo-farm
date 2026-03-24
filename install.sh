@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ═══════════════════════════════════════════════════════
-#  🐔 POLLO FARM v4.0 - Dynamic ADB Installer
+#  🐔 POLLO FARM v4.1 - Dynamic ADB (IPv4 Fixed)
 #  curl -sL https://raw.githubusercontent.com/kemhi88-hue/pollo-farm/refs/heads/main/install.sh | bash -s -- "SSH_STRING" "SSH_PASSWORD"
 # ═══════════════════════════════════════════════════════
 
@@ -56,64 +56,27 @@ validate_config() {
     local MISSING=0
     echo -e "${CYAN}[*] Validating config...${NC}"
 
-    if [ -z "$SSH_USER" ]; then
-        echo -e "${RED}  ✗ SSH_USER missing${NC}"; MISSING=1
-    else
-        echo -e "${GREEN}  ✓ SSH_USER: $SSH_USER${NC}"
-    fi
-
-    if [ -z "$SSH_HOST" ]; then
-        echo -e "${RED}  ✗ SSH_HOST missing${NC}"; MISSING=1
-    else
-        echo -e "${GREEN}  ✓ SSH_HOST: $SSH_HOST${NC}"
-    fi
-
-    if [ -z "$SSH_PORT" ]; then
-        echo -e "${RED}  ✗ SSH_PORT missing${NC}"; MISSING=1
-    else
-        echo -e "${GREEN}  ✓ SSH_PORT: $SSH_PORT${NC}"
-    fi
-
-    if [ -z "$SSH_PASS" ]; then
-        echo -e "${RED}  ✗ SSH_PASS missing${NC}"; MISSING=1
-    else
-        echo -e "${GREEN}  ✓ SSH_PASS: ${SSH_PASS:0:10}...${NC}"
-    fi
-
-    if [ -z "$LOCAL_PORT" ]; then
-        echo -e "${RED}  ✗ LOCAL_PORT missing${NC}"; MISSING=1
-    else
-        echo -e "${GREEN}  ✓ LOCAL_PORT: $LOCAL_PORT${NC}"
-    fi
-
-    if [ -z "$REMOTE_ADB" ]; then
-        echo -e "${RED}  ✗ REMOTE_ADB missing${NC}"; MISSING=1
-    else
-        echo -e "${GREEN}  ✓ REMOTE_ADB: $REMOTE_ADB${NC}"
-    fi
+    [ -z "$SSH_USER" ] && echo -e "${RED}  ✗ SSH_USER missing${NC}" && MISSING=1 || echo -e "${GREEN}  ✓ SSH_USER: $SSH_USER${NC}"
+    [ -z "$SSH_HOST" ] && echo -e "${RED}  ✗ SSH_HOST missing${NC}" && MISSING=1 || echo -e "${GREEN}  ✓ SSH_HOST: $SSH_HOST${NC}"
+    [ -z "$SSH_PORT" ] && echo -e "${RED}  ✗ SSH_PORT missing${NC}" && MISSING=1 || echo -e "${GREEN}  ✓ SSH_PORT: $SSH_PORT${NC}"
+    [ -z "$SSH_PASS" ] && echo -e "${RED}  ✗ SSH_PASS missing${NC}" && MISSING=1 || echo -e "${GREEN}  ✓ SSH_PASS: ${SSH_PASS:0:10}...${NC}"
+    [ -z "$LOCAL_PORT" ] && echo -e "${RED}  ✗ LOCAL_PORT missing${NC}" && MISSING=1 || echo -e "${GREEN}  ✓ LOCAL_PORT: $LOCAL_PORT${NC}"
+    [ -z "$REMOTE_ADB" ] && echo -e "${RED}  ✗ REMOTE_ADB missing${NC}" && MISSING=1 || echo -e "${GREEN}  ✓ REMOTE_ADB: $REMOTE_ADB${NC}"
 
     echo -e "${GREEN}  ✓ SERIAL: $SERIAL${NC}"
 
     if [ $MISSING -eq 1 ]; then
-        echo ""
-        echo -e "${RED}══════════════════════════════════════════════════════════════${NC}"
+        echo -e "\n${RED}══════════════════════════════════════════════════════════════${NC}"
         echo -e "${RED}  THIẾU THÔNG TIN KẾT NỐI!${NC}"
         echo -e "${RED}══════════════════════════════════════════════════════════════${NC}"
-        echo ""
-        echo -e "${YELLOW}Cách dùng:${NC}"
+        echo -e "\n${YELLOW}Cách dùng:${NC}"
         echo -e "  curl -sL URL | bash -s -- \"user@host -p PORT -L LPORT:RHOST:RPORT\" \"password\""
-        echo ""
-        echo -e "${YELLOW}Ví dụ:${NC}"
-        echo -e "  curl -sL https://raw.githubusercontent.com/kemhi88-hue/pollo-farm/refs/heads/main/install.sh | bash -s -- \\"
-        echo -e "    \"10.12.11.115_1774374783100@98.98.37.2 -p 1824 -L 9999:adb-proxy:63494\" \\"
-        echo -e "    \"54XaO77/password_here\""
-        echo ""
-        echo -e "${YELLOW}Hoặc kèm INVITE:${NC}"
-        echo -e "  curl -sL URL | INVITE=ABC123 bash -s -- \"ssh_string\" \"password\""
-        echo ""
+        echo -e "\n${YELLOW}Ví dụ:${NC}"
+        echo -e "  curl -sL https://raw.githubusercontent.com/kemhi88-hue/pollo-farm/main/install.sh | bash -s -- \\"
+        echo -e "    \"10.12.11.115_xxx@98.98.37.2 -p 1824 -L 9999:adb-proxy:63494\" \\"
+        echo -e "    \"your_password_here\""
         exit 1
     fi
-
     echo -e "${GREEN}[OK] Config valid${NC}"
 }
 
@@ -135,27 +98,36 @@ install_deps() {
 
 kill_tunnel() {
     pkill -f "ssh.*${SSH_HOST}.*${SSH_PORT}" 2>/dev/null
+    fuser -k ${LOCAL_PORT}/tcp 2>/dev/null
     adb kill-server 2>/dev/null
-    sleep 1
+    sleep 2
 }
 
 start_tunnel() {
     echo -e "${CYAN}[*] SSH tunnel → ${SSH_USER}@${SSH_HOST}:${SSH_PORT}${NC}"
     echo -e "${CYAN}    Local :${LOCAL_PORT} → ${REMOTE_ADB}${NC}"
+    
     mkdir -p ~/.ssh && chmod 700 ~/.ssh
     ssh-keyscan -p $SSH_PORT $SSH_HOST >> ~/.ssh/known_hosts 2>/dev/null
+    
+    # *** FIX: Thêm -4 để force IPv4, tránh lỗi bind [::1] ***
     sshpass -p "$SSH_PASS" ssh \
+        -4 \
         -oHostKeyAlgorithms=+ssh-rsa \
         -oStrictHostKeyChecking=no \
         -oServerAliveInterval=30 \
         -oServerAliveCountMax=3 \
-        -L ${LOCAL_PORT}:${REMOTE_ADB} \
+        -oExitOnForwardFailure=yes \
+        -L 127.0.0.1:${LOCAL_PORT}:${REMOTE_ADB} \
         -Nf \
         ${SSH_USER}@${SSH_HOST} \
-        -p ${SSH_PORT} 2>/dev/null
-    if [ $? -eq 0 ]; then
-        echo -e "${GREEN}[OK] SSH tunnel${NC}"
-        sleep 2
+        -p ${SSH_PORT}
+    
+    local RET=$?
+    sleep 2
+    
+    if [ $RET -eq 0 ] && ss -tlnp 2>/dev/null | grep -q ":${LOCAL_PORT}"; then
+        echo -e "${GREEN}[OK] SSH tunnel (port ${LOCAL_PORT} listening)${NC}"
         return 0
     else
         echo -e "${RED}[FAIL] SSH tunnel${NC}"
@@ -164,7 +136,8 @@ start_tunnel() {
 }
 
 check_tunnel() {
-    pgrep -f "ssh.*${SSH_HOST}.*${SSH_PORT}" >/dev/null 2>&1
+    pgrep -f "ssh.*${SSH_HOST}.*${SSH_PORT}" >/dev/null 2>&1 && \
+    ss -tlnp 2>/dev/null | grep -q ":${LOCAL_PORT}"
 }
 
 ensure_tunnel() {
@@ -178,13 +151,18 @@ ensure_tunnel() {
 
 connect_adb() {
     echo -e "${CYAN}[*] ADB connect → $SERIAL${NC}"
+    
+    # Start ADB với biến môi trường cố định
+    export ADB_SERVER_SOCKET=tcp:127.0.0.1:5037
+    
     adb kill-server 2>/dev/null
     sleep 1
-    adb start-server 2>/dev/null
-    sleep 1
-    adb connect $SERIAL 2>/dev/null
+    adb -L tcp:127.0.0.1:5037 start-server 2>/dev/null
     sleep 2
-    if adb -s $SERIAL shell echo OK >/dev/null 2>&1; then
+    adb connect $SERIAL 2>/dev/null
+    sleep 3
+    
+    if adb -s $SERIAL shell echo OK 2>/dev/null | grep -q OK; then
         echo -e "${GREEN}[OK] ADB: $SERIAL${NC}"
         return 0
     else
@@ -430,7 +408,7 @@ run_one() {
 # ═══════════════════════════════
 clear
 echo -e "${GREEN}╔══════════════════════════════════════════╗${NC}"
-echo -e "${GREEN}║  🐔 POLLO FARM v4.0 (Dynamic ADB) 🐔    ║${NC}"
+echo -e "${GREEN}║  🐔 POLLO FARM v4.1 (IPv4 Fixed) 🐔     ║${NC}"
 echo -e "${GREEN}╚══════════════════════════════════════════╝${NC}"
 echo ""
 
