@@ -8,7 +8,6 @@ INVITE="${INVITE:-abc123}"
 PACKAGE="ai.pollo.ai"
 PASS="111111"
 
-# ================== Colors ==================
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -141,22 +140,36 @@ focus_and_type() {
     sleep 0.3
 }
 
-# ================== APK Install ==================
-echo -e "${CYAN}[*] Installing Pollo.ai APK...${NC}"
-TMP_APK="/tmp/Pollo.ai_Android.apk"
-curl -L -o "$TMP_APK" "https://videocdn.pollo.ai/app/android/Pollo.ai_Android.apk"
-if [ $? -ne 0 ] || [ ! -f "$TMP_APK" ]; then
-    echo -e "${RED}[FAIL] Download APK${NC}"
-    exit 1
-fi
+# ================== APK Install (ĐÃ SỬA) ==================
+install_apk() {
+    echo -e "${CYAN}[*] Checking Pollo.ai APK...${NC}"
+    
+    if adb -s "$SERIAL" shell pm list packages 2>/dev/null | grep -q "$PACKAGE"; then
+        echo -e "${GREEN}[OK] APK already installed${NC}"
+        return 0
+    fi
 
-adb -s "$SERIAL" install -r "$TMP_APK" >/dev/null 2>&1
-if [ $? -eq 0 ]; then
-    echo -e "${GREEN}[OK] APK installed${NC}"
-else
-    echo -e "${RED}[FAIL] APK install${NC}"
-    exit 1
-fi
+    TMP_APK="/tmp/Pollo.ai_Android.apk"
+    
+    if [ ! -f "$TMP_APK" ]; then
+        echo -e "${CYAN}[*] Downloading APK...${NC}"
+        curl -L -o "$TMP_APK" "https://videocdn.pollo.ai/app/android/Pollo.ai_Android.apk"
+        if [ $? -ne 0 ] || [ ! -f "$TMP_APK" ]; then
+            echo -e "${RED}[FAIL] Download APK${NC}"
+            return 1
+        fi
+    fi
+
+    echo -e "${CYAN}[*] Installing APK...${NC}"
+    adb -s "$SERIAL" install -r "$TMP_APK"
+    if [ $? -eq 0 ]; then
+        echo -e "${GREEN}[OK] APK installed${NC}"
+        return 0
+    else
+        echo -e "${RED}[FAIL] APK install${NC}"
+        return 1
+    fi
+}
 
 # ================== Mail/OTP ==================
 create_mail() {
@@ -305,7 +318,7 @@ run_one() {
 
 # ================== Main ==================
 clear
-echo -e "${GREEN}╔════════ POLLO FARM v3.0 ════════╗${NC}"
+echo -e "${GREEN}╔════════ POLLO FARM v3.1 ════════╗${NC}"
 echo -e "${GREEN}║ SSH: ${SSH_HOST}:${SSH_PORT}           ║${NC}"
 echo -e "${GREEN}║ ADB: ${SERIAL}                       ║${NC}"
 echo -e "${GREEN}╚═══════════════════════════════════╝${NC}"
@@ -314,6 +327,7 @@ install_deps
 kill_tunnel
 start_tunnel || exit 1
 connect_adb || exit 1
+install_apk || exit 1    # ← THÊM DÒNG NÀY
 
 echo -e "\n${GREEN}[🚀] Starting farm...${NC}\n"
 COUNT=1 OK=0 FAIL=0
@@ -332,5 +346,4 @@ while true; do
 done
 EOF
 
-# Chạy script
 bash ~/pollo_farm.sh
