@@ -15,21 +15,49 @@ CYAN='\033[0;36m'
 NC='\033[0m'
 
 # ================== Decode CMD/Key ==================
+echo -e "${CYAN}[*] Decoding variables...${NC}"
+
 if [ -n "$CMD" ]; then
     CMD=$(echo "$CMD" | base64 --decode)
+    echo -e "${GREEN}[OK] Decoded CMD:${NC}"
+    echo "  $CMD"
+else
+    echo -e "${RED}[ERROR] CMD is empty!${NC}"
+    exit 1
 fi
+
 if [ -n "$key" ]; then
     key=$(echo "$key" | base64 --decode)
+    echo -e "${GREEN}[OK] Decoded key (${#key} chars)${NC}"
+else
+    echo -e "${RED}[ERROR] key is empty!${NC}"
+    exit 1
 fi
 
 # ================== Parse SSH info ==================
 if [ -n "$CMD" ]; then
+    echo -e "${CYAN}[*] Parsing SSH info...${NC}"
+    
     SSH_USER=$(echo "$CMD" | grep -oP '\S+@\S+' | cut -d@ -f1)
     SSH_HOST=$(echo "$CMD" | grep -oP '\S+@\S+' | cut -d@ -f2)
     SSH_PORT=$(echo "$CMD" | grep -oP '-p\s+\K[0-9]+')
     LOCAL_PORT=$(echo "$CMD" | grep -oP '-L\s+\K[0-9]+')
     REMOTE_ADB=$(echo "$CMD" | grep -oP '-L\s+[0-9]+:\K[^ ]+')
     SERIAL="localhost:${LOCAL_PORT}"
+    
+    echo -e "${GREEN}[OK] Parsed SSH info:${NC}"
+    echo "  SSH_USER    = ${SSH_USER}"
+    echo "  SSH_HOST    = ${SSH_HOST}"
+    echo "  SSH_PORT    = ${SSH_PORT}"
+    echo "  LOCAL_PORT  = ${LOCAL_PORT}"
+    echo "  REMOTE_ADB  = ${REMOTE_ADB}"
+    echo "  SERIAL      = ${SERIAL}"
+    
+    # Kiểm tra biến rỗng
+    if [ -z "$SSH_USER" ] || [ -z "$SSH_HOST" ] || [ -z "$SSH_PORT" ]; then
+        echo -e "${RED}[ERROR] Failed to parse SSH info!${NC}"
+        exit 1
+    fi
 fi
 
 # ================== Dependencies ==================
@@ -57,29 +85,21 @@ kill_tunnel() {
 }
 
 start_tunnel() {
-    echo -e "${CYAN}[*] SSH tunnel...${NC}"
-    
-    # Debug thông tin kết nối
-    echo -e "${YELLOW}[DEBUG] SSH Info:${NC}"
-    echo "  User: ${SSH_USER}"
-    echo "  Host: ${SSH_HOST}"
-    echo "  Port: ${SSH_PORT}"
-    echo "  Local Port: ${LOCAL_PORT}"
-    echo "  Remote ADB: ${REMOTE_ADB}"
-    echo "  Password length: ${#key} chars"
+    echo -e "${CYAN}[*] Starting SSH tunnel...${NC}"
     
     mkdir -p ~/.ssh && chmod 700 ~/.ssh
     
     # Thêm host key
-    echo -e "${CYAN}[*] Adding host key...${NC}"
+    echo -e "${CYAN}[*] Adding host key for ${SSH_HOST}:${SSH_PORT}...${NC}"
     ssh-keyscan -p $SSH_PORT $SSH_HOST >> ~/.ssh/known_hosts 2>&1
     
-    # Thử kết nối SSH với hiển thị lỗi
-    echo -e "${CYAN}[*] Connecting SSH tunnel...${NC}"
+    # Test kết nối với verbose
+    echo -e "${CYAN}[*] Testing SSH connection...${NC}"
     SSH_OUTPUT=$(sshpass -p "$key" ssh \
         -v \
         -oHostKeyAlgorithms=+ssh-rsa \
         -oStrictHostKeyChecking=no \
+        -oConnectTimeout=10 \
         -oServerAliveInterval=30 \
         -oServerAliveCountMax=3 \
         -L ${LOCAL_PORT}:${REMOTE_ADB} \
@@ -90,13 +110,31 @@ start_tunnel() {
     SSH_EXIT=$?
     
     if [ $SSH_EXIT -eq 0 ]; then
-        echo -e "${GREEN}[OK] SSH tunnel${NC}"
+        echo -e "${GREEN}[OK] SSH tunnel established${NC}"
         sleep 2
         return 0
     else
-        echo -e "${RED}[FAIL] SSH tunnel (exit code: $SSH_EXIT)${NC}"
-        echo -e "${RED}[ERROR] SSH output:${NC}"
-        echo "$SSH_OUTPUT" | tail -20  # In 20 dòng cuối
+        echo -e "${RED}╔════════════════════════════════════════════════════════════╗${NC}"
+        echo -e "${RED}║               SSH TUNNEL FAILED (exit: $SSH_EXIT)              ║${NC}"
+        echo -e "${RED}╚════════════════════════════════════════════════════════════╝${NC}"
+        echo -e "${YELLOW}[ERROR DETAILS]${NC}"
+        echo "$SSH_OUTPUT" | grep -E "debug1|Permission denied|Connection refused|Network|timeout" | tail -15
+        echo -e "${RED}════════════════════════════════════════════════════════════${NC}"
+        
+        # Thử ping host
+        echo -e "${CYAN}[*] Testing network to ${SSH_HOST}...${NC}"
+        if ping -c 2 -W 3 $SSH_HOST >/dev/null 2>&1; then
+            echo -e "${GREEN}[OK] Host is reachable${NC}"
+        else
+            echo -e "${RED}[FAIL] Cannot reach host${NC}"
+        fi
+        
+        # Thử telnet port
+        echo -e "${CYAN}[*] Testing port ${SSH_PORT}...${NC}"
+        timeout 3 bash -c "echo > /dev/tcp/${SSH_HOST}/${SSH_PORT}" 2>/dev/null && \
+            echo -e "${GREEN}[OK] Port is open${NC}" || \
+            echo -e "${RED}[FAIL] Port is closed/filtered${NC}"
+        
         return 1
     fi
 }
@@ -133,6 +171,8 @@ connect_adb() {
     fi
 }
 
+# ... (phần còn lại giữ nguyên)
+EOF
 hide_kb() {
     adb -s $SERIAL shell input keyevent 4 >/dev/null 2>&1
     sleep 0.1
