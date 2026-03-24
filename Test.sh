@@ -18,7 +18,8 @@ echo -e "${CYAN}[*] Decoding variables...${NC}"
 
 if [ -n "$CMD" ]; then
     CMD=$(echo "$CMD" | base64 --decode)
-    echo -e "${GREEN}[OK] Decoded CMD:${NC} $CMD"
+    echo -e "${GREEN}[OK] Decoded CMD:${NC}"
+    echo "  $CMD"
 else
     echo -e "${RED}[ERROR] CMD is empty!${NC}"
     exit 1
@@ -32,23 +33,39 @@ else
     exit 1
 fi
 
-# ================== Parse SSH info ==================
+# ================== Parse SSH info (ĐÃ SỬA - dùng awk) ==================
 if [ -n "$CMD" ]; then
     echo -e "${CYAN}[*] Parsing SSH info...${NC}"
     
-    SSH_USER=$(echo "$CMD" | grep -oP '\S+@\S+' | cut -d@ -f1)
-    SSH_HOST=$(echo "$CMD" | grep -oP '\S+@\S+' | cut -d@ -f2)
-    SSH_PORT=$(echo "$CMD" | grep -oP '-p\s+\K[0-9]+')
-    LOCAL_PORT=$(echo "$CMD" | grep -oP '-L\s+\K[0-9]+')
-    REMOTE_ADB=$(echo "$CMD" | grep -oP '-L\s+[0-9]+:\K[^ ]+')
+    # Parse user@host
+    USER_HOST=$(echo "$CMD" | awk '{for(i=1;i<=NF;i++) if($i ~ /@/) print $i}')
+    SSH_USER=$(echo "$USER_HOST" | cut -d@ -f1)
+    SSH_HOST=$(echo "$USER_HOST" | cut -d@ -f2)
+    
+    # Parse -p PORT
+    SSH_PORT=$(echo "$CMD" | awk '{for(i=1;i<=NF;i++) if($i=="-p") print $(i+1)}')
+    
+    # Parse -L LOCAL:REMOTE
+    L_PARAM=$(echo "$CMD" | awk '{for(i=1;i<=NF;i++) if($i=="-L") print $(i+1)}')
+    LOCAL_PORT=$(echo "$L_PARAM" | cut -d: -f1)
+    REMOTE_ADB=$(echo "$L_PARAM" | cut -d: -f2-)
+    
     SERIAL="localhost:${LOCAL_PORT}"
     
     echo -e "${GREEN}[OK] Parsed:${NC}"
-    echo "  User: ${SSH_USER} | Host: ${SSH_HOST} | Port: ${SSH_PORT}"
-    echo "  Local: ${LOCAL_PORT} | Remote ADB: ${REMOTE_ADB}"
+    echo "  SSH_USER    = ${SSH_USER}"
+    echo "  SSH_HOST    = ${SSH_HOST}"
+    echo "  SSH_PORT    = ${SSH_PORT}"
+    echo "  LOCAL_PORT  = ${LOCAL_PORT}"
+    echo "  REMOTE_ADB  = ${REMOTE_ADB}"
+    echo "  SERIAL      = ${SERIAL}"
     
+    # Validate
     if [ -z "$SSH_USER" ] || [ -z "$SSH_HOST" ] || [ -z "$SSH_PORT" ]; then
         echo -e "${RED}[ERROR] Parse failed!${NC}"
+        echo -e "${YELLOW}Debug info:${NC}"
+        echo "  USER_HOST = [$USER_HOST]"
+        echo "  L_PARAM   = [$L_PARAM]"
         exit 1
     fi
 fi
