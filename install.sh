@@ -4,7 +4,7 @@ cat > ~/pollo_farm.sh << 'EOF'
 PACKAGE="ai.pollo.ai"
 PASS="YourPassword123"
 INVITE="${INVITE:-}"
-SERIAL="localhost:9163"
+SERIAL="localhost:9999"
 
 SSH_USER="10.12.11.115_1774374783100"
 SSH_HOST="98.98.37.2"
