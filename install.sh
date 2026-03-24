@@ -391,4 +391,4 @@ done
 EOF
 
 chmod +x ~/pollo_farm.sh
-INVITE="MÃ_INVITE_CỦA_BẠN" bash ~/pollo_farm.sh
+bash ~/pollo_farm.sh
