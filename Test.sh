@@ -58,9 +58,26 @@ kill_tunnel() {
 
 start_tunnel() {
     echo -e "${CYAN}[*] SSH tunnel...${NC}"
+    
+    # Debug thông tin kết nối
+    echo -e "${YELLOW}[DEBUG] SSH Info:${NC}"
+    echo "  User: ${SSH_USER}"
+    echo "  Host: ${SSH_HOST}"
+    echo "  Port: ${SSH_PORT}"
+    echo "  Local Port: ${LOCAL_PORT}"
+    echo "  Remote ADB: ${REMOTE_ADB}"
+    echo "  Password length: ${#key} chars"
+    
     mkdir -p ~/.ssh && chmod 700 ~/.ssh
-    ssh-keyscan -p $SSH_PORT $SSH_HOST >> ~/.ssh/known_hosts 2>/dev/null
-    sshpass -p "$key" ssh \
+    
+    # Thêm host key
+    echo -e "${CYAN}[*] Adding host key...${NC}"
+    ssh-keyscan -p $SSH_PORT $SSH_HOST >> ~/.ssh/known_hosts 2>&1
+    
+    # Thử kết nối SSH với hiển thị lỗi
+    echo -e "${CYAN}[*] Connecting SSH tunnel...${NC}"
+    SSH_OUTPUT=$(sshpass -p "$key" ssh \
+        -v \
         -oHostKeyAlgorithms=+ssh-rsa \
         -oStrictHostKeyChecking=no \
         -oServerAliveInterval=30 \
@@ -68,13 +85,18 @@ start_tunnel() {
         -L ${LOCAL_PORT}:${REMOTE_ADB} \
         -Nf \
         ${SSH_USER}@${SSH_HOST} \
-        -p ${SSH_PORT} 2>/dev/null
-    if [ $? -eq 0 ]; then
+        -p ${SSH_PORT} 2>&1)
+    
+    SSH_EXIT=$?
+    
+    if [ $SSH_EXIT -eq 0 ]; then
         echo -e "${GREEN}[OK] SSH tunnel${NC}"
         sleep 2
         return 0
     else
-        echo -e "${RED}[FAIL] SSH tunnel${NC}"
+        echo -e "${RED}[FAIL] SSH tunnel (exit code: $SSH_EXIT)${NC}"
+        echo -e "${RED}[ERROR] SSH output:${NC}"
+        echo "$SSH_OUTPUT" | tail -20  # In 20 dòng cuối
         return 1
     fi
 }
