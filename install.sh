@@ -3,7 +3,7 @@ cat > ~/pollo_farm.sh << 'EOF'
 
 PACKAGE="ai.pollo.ai"
 PASS="YourPassword123"
-INVITE="ohwXf1 "
+INVITE="${API_KEY:-abc123}"
 SERIAL="localhost:9163"
 
 SSH_USER="10.10.47.45_1774307563126"
