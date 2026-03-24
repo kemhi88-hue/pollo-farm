@@ -1,5 +1,5 @@
 cat > ~/pollo_farm.sh << 'EOFMAIN'
-#!/data/data/com.termux/files/usr/bin/bash
+#!/bin/bash
 
 # ═══════════════════════════════════════
 # POLLO FARM - AUTO SSH + FIX OTP
@@ -10,7 +10,6 @@ PASS="YourPassword123"
 INVITE="L54v43"
 SERIAL="localhost:9163"
 
-# ═══ SSH CONFIG ═══
 SSH_USER="10.10.47.45_1774307563126"
 SSH_HOST="162.128.224.130"
 SSH_PORT="1824"
@@ -24,30 +23,28 @@ YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
-# ═══════════════════════════════════════
-# CÀI DEPENDENCIES
-# ═══════════════════════════════════════
-
 install_deps() {
     echo -e "${CYAN}[*] Kiểm tra dependencies...${NC}"
     local NEED=""
-    command -v ssh      >/dev/null 2>&1 || NEED="$NEED openssh"
+    command -v ssh      >/dev/null 2>&1 || NEED="$NEED openssh-client"
     command -v sshpass  >/dev/null 2>&1 || NEED="$NEED sshpass"
-    command -v adb      >/dev/null 2>&1 || NEED="$NEED android-tools"
+    command -v adb      >/dev/null 2>&1 || NEED="$NEED adb"
     command -v jq       >/dev/null 2>&1 || NEED="$NEED jq"
     command -v curl     >/dev/null 2>&1 || NEED="$NEED curl"
 
     if [ -n "$NEED" ]; then
         echo -e "${YELLOW}[!] Cài:$NEED${NC}"
-        pkg update -y >/dev/null 2>&1
-        pkg install -y $NEED >/dev/null 2>&1
+        if command -v apt >/dev/null 2>&1; then
+            sudo apt update -y >/dev/null 2>&1
+            sudo apt install -y $NEED >/dev/null 2>&1
+        elif command -v pkg >/dev/null 2>&1; then
+            pkg install -y $NEED >/dev/null 2>&1
+        elif command -v yum >/dev/null 2>&1; then
+            sudo yum install -y $NEED >/dev/null 2>&1
+        fi
     fi
     echo -e "${GREEN}[✓] Dependencies OK${NC}"
 }
-
-# ═══════════════════════════════════════
-# SSH TUNNEL
-# ═══════════════════════════════════════
 
 kill_tunnel() {
     pkill -f "ssh.*${SSH_HOST}.*${SSH_PORT}" 2>/dev/null
@@ -98,10 +95,6 @@ ensure_tunnel() {
     return 0
 }
 
-# ═══════════════════════════════════════
-# ADB
-# ═══════════════════════════════════════
-
 connect_adb() {
     echo -e "${CYAN}[*] Kết nối ADB...${NC}"
     adb kill-server 2>/dev/null
@@ -151,10 +144,6 @@ focus_and_type() {
     sleep 0.3
 }
 
-# ═══════════════════════════════════════
-# TẠO EMAIL
-# ═══════════════════════════════════════
-
 create_mail() {
     echo -e "${CYAN}[*] Tạo email...${NC}"
 
@@ -201,7 +190,6 @@ create_mail() {
 
     echo -e "${GREEN}[✓] Email: $EMAIL${NC}"
 
-    # ═══ LẤY TOKEN NGAY ═══
     sleep 1
     retry=0
     MAIL_TOKEN=""
@@ -212,7 +200,7 @@ create_mail() {
             | jq -r '.token // empty' 2>/dev/null)
 
         if [ -n "$MAIL_TOKEN" ] && [ "$MAIL_TOKEN" != "null" ] && [ ${#MAIL_TOKEN} -gt 20 ]; then
-            echo -e "${GREEN}[✓] Token OK (${#MAIL_TOKEN} chars)${NC}"
+            echo -e "${GREEN}[✓] Token OK${NC}"
             return 0
         fi
 
@@ -224,13 +212,6 @@ create_mail() {
     echo -e "${RED}[✗] Lấy token thất bại${NC}"
     return 1
 }
-
-# ═══════════════════════════════════════
-# LẤY OTP (FIX HOÀN TOÀN)
-# ═══════════════════════════════════════
-# stdout = CHỈ OTP
-# stderr = tất cả log
-# ═══════════════════════════════════════
 
 get_otp() {
     local TOKEN="$MAIL_TOKEN"
@@ -249,25 +230,21 @@ get_otp() {
     while [ $attempt -lt $max ]; do
         attempt=$((attempt + 1))
 
-        # Log mỗi 5 lần
         if [ $((attempt % 5)) -eq 0 ]; then
             echo -e "  ${CYAN}⏳ Đợi OTP ($attempt/$max)...${NC}" >&2
         fi
 
-        # Lấy messages
         local MSGS=$(curl -s --max-time 10 \
             -H "Authorization: Bearer $TOKEN" \
             https://api.mail.tm/messages 2>/dev/null)
 
         [ -z "$MSGS" ] && sleep 3 && continue
 
-        # Đếm
         local TOTAL=$(echo "$MSGS" | jq -r '.["hydra:totalItems"] // 0' 2>/dev/null)
         [ "$TOTAL" = "0" ] || [ -z "$TOTAL" ] || [ "$TOTAL" = "null" ] && sleep 3 && continue
 
         echo -e "  ${GREEN}📨 Có $TOTAL email${NC}" >&2
 
-        # Lấy message ID mới nhất
         local MSG_ID=$(echo "$MSGS" | jq -r '
             .["hydra:member"]
             | sort_by(.createdAt)
@@ -277,22 +254,17 @@ get_otp() {
 
         [ -z "$MSG_ID" ] || [ "$MSG_ID" = "null" ] && sleep 3 && continue
 
-        echo -e "  ${CYAN}MSG ID: $MSG_ID${NC}" >&2
-
-        # Đọc nội dung
         local FULL=$(curl -s --max-time 10 \
             -H "Authorization: Bearer $TOKEN" \
             "https://api.mail.tm/messages/$MSG_ID" 2>/dev/null)
 
         [ -z "$FULL" ] && sleep 3 && continue
 
-        # Trích xuất mọi trường
         local F_SUBJECT=$(echo "$FULL" | jq -r '.subject // ""' 2>/dev/null)
         local F_TEXT=$(echo "$FULL" | jq -r '.text // ""' 2>/dev/null)
         local F_INTRO=$(echo "$FULL" | jq -r '.intro // ""' 2>/dev/null)
         local F_HTML=$(echo "$FULL" | jq -r '.html // ""' 2>/dev/null)
 
-        # Strip HTML tags
         local F_HTML_CLEAN=""
         if [ -n "$F_HTML" ] && [ "$F_HTML" != "null" ]; then
             F_HTML_CLEAN=$(echo "$F_HTML" | sed 's/<[^>]*>//g; s/&nbsp;/ /g; s/&#[0-9]*;//g')
@@ -300,37 +272,28 @@ get_otp() {
 
         echo -e "  ${CYAN}Subject: $F_SUBJECT${NC}" >&2
 
-        # Gộp tất cả
         local ALL="$F_SUBJECT $F_INTRO $F_TEXT $F_HTML_CLEAN"
 
-        # ═══ TÌM OTP ═══
-
-        # Cách 1: Tìm gần keyword
         local OTP=""
-        OTP=$(echo "$ALL" | grep -oiE '(code|otp|verification|verify|mã|is)[^0-9]{0,20}[0-9]{4,6}' \
+        OTP=$(echo "$ALL" | grep -oiE '(code|otp|verification|verify|is)[^0-9]{0,20}[0-9]{4,6}' \
             | grep -oE '[0-9]{4,6}' | head -1)
 
-        # Cách 2: Số 6 chữ số đứng riêng
         if [ -z "$OTP" ]; then
             OTP=$(echo "$ALL" | grep -oE '\b[0-9]{6}\b' | head -1)
         fi
 
-        # Cách 3: Số 4 chữ số
         if [ -z "$OTP" ]; then
             OTP=$(echo "$ALL" | grep -oE '\b[0-9]{4}\b' | head -1)
         fi
 
-        # Trim
         OTP=$(echo "$OTP" | tr -d '\r\n\t ')
 
-        # Validate
         if [[ "$OTP" =~ ^[0-9]{4,6}$ ]]; then
             echo -e "  ${GREEN}✅ OTP: $OTP${NC}" >&2
-            echo "$OTP"  # ← CHỈ DÒNG NÀY RA STDOUT
+            echo "$OTP"
             return 0
         fi
 
-        # Debug nếu có email nhưng không tìm được
         echo -e "  ${YELLOW}Có email nhưng chưa tìm được OTP${NC}" >&2
         echo -e "  ${YELLOW}Text: ${F_TEXT:0:150}${NC}" >&2
 
@@ -342,168 +305,5 @@ get_otp() {
     return 1
 }
 
-# ═══════════════════════════════════════
-# CHẠY 1 LƯỢT
-# ═══════════════════════════════════════
-
 run_one() {
-    echo -e "\n${YELLOW}════════════════════════════════${NC}"
-    echo -e "${YELLOW}  RUN #$1${NC}"
-    echo -e "${YELLOW}════════════════════════════════${NC}"
-
-    # Kiểm tra tunnel
-    ensure_tunnel || return 1
-
-    echo -e "${CYAN}[1] Clear${NC}"
-    adb -s $SERIAL shell pm clear $PACKAGE >/dev/null 2>&1
-    sleep 2
-
-    echo -e "${CYAN}[2] Open${NC}"
-    adb -s $SERIAL shell monkey -p $PACKAGE -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
-    sleep 12
-
-    echo -e "${CYAN}[3] Navigate${NC}"
-    tap 110 457 "menu";      sleep 3
-    tap 623 1232 "login/reg"; sleep 2
-    tap 360 725 "login";      sleep 1
-    tap 94 1210 "register";   sleep 1
-    tap 283 1100 "next";      sleep 1
-    tap 489 452 "next";       sleep 1
-    tap 258 556 "email";      sleep 1
-
-    echo -e "${CYAN}[4] Mail${NC}"
-    create_mail || return 1
-
-    focus_and_type 258 556 "$EMAIL" "email"
-    sleep 1
-    tap 350 670 "GetOTP"
-
-    echo -e "${CYAN}[*] Chờ 8s cho server gửi OTP...${NC}"
-    sleep 8
-
-    echo -e "${CYAN}[5] OTP${NC}"
-    OTP=$(get_otp)
-    OTP=$(echo "$OTP" | tr -d '\r\n\t ')
-
-    echo -e "${CYAN}[*] OTP nhận được: [$OTP]${NC}"
-
-    if [[ ! "$OTP" =~ ^[0-9]{4,6}$ ]]; then
-        echo -e "${RED}[✗] OTP không hợp lệ: [$OTP]${NC}"
-        return 1
-    fi
-
-    echo -e "${GREEN}[✓] OTP: $OTP${NC}"
-
-    # Nhập OTP từng số
-    tap 258 556 "OTP field"; sleep 0.5
-    for (( i=0; i<${#OTP}; i++ )); do
-        adb -s $SERIAL shell input text "${OTP:$i:1}"
-        sleep 0.15
-    done
-    sleep 1
-    tap 340 650 "submit"; sleep 5
-
-    echo -e "${CYAN}[6] Info${NC}"
-    focus_and_type 210 580 "Minh" "name"
-    sleep 1
-    focus_and_type 505 567 "Nguyen" "last"
-    sleep 1
-    focus_and_type 154 711 "$PASS" "pass"
-    sleep 2
-
-    tap 324 843 "CREATE"; sleep 5
-
-    echo -e "${CYAN}[7] Login${NC}"
-    tap 352 457 "email"; sleep 2
-    focus_and_type 209 677 "$PASS" "pass"
-    sleep 1
-    tap 361 783 "submit"; sleep 4
-
-    echo -e "${CYAN}[8] Next${NC}"
-    tap 444 85 "qua"; sleep 2
-    tap 580 1018 "qua"; sleep 2
-
-    echo -e "${CYAN}[9] Scroll${NC}"
-    adb -s $SERIAL shell input swipe 500 1000 500 200 1000
-    sleep 2
-
-    echo -e "${CYAN}[10] Invite${NC}"
-    focus_and_type 173 973 "$INVITE" "invite"
-    sleep 1
-    adb -s $SERIAL shell input keyevent 66
-    sleep 1
-
-    echo -e "${CYAN}[11] Redeem${NC}"
-    tap 548 686 "REDEEM"; sleep 3
-
-    echo -e "${GREEN}╔════════════════════════════════╗${NC}"
-    echo -e "${GREEN}║  ✅ SUCCESS #$1                 ║${NC}"
-    echo -e "${GREEN}║  $EMAIL${NC}"
-    echo -e "${GREEN}╚════════════════════════════════╝${NC}"
-
-    echo "$(date '+%Y-%m-%d %H:%M:%S') | #$1 | $EMAIL | $PASS" >> ~/success.txt
-    return 0
-}
-
-# ═══════════════════════════════════════
-# MAIN
-# ═══════════════════════════════════════
-
-clear
-
-echo -e "${GREEN}╔════════════════════════════════════╗${NC}"
-echo -e "${GREEN}║                                    ║${NC}"
-echo -e "${GREEN}║   🐔 POLLO FARM v3.0 🐔           ║${NC}"
-echo -e "${GREEN}║   AUTO SSH + FIX OTP               ║${NC}"
-echo -e "${GREEN}║                                    ║${NC}"
-echo -e "${GREEN}║   SSH : ${SSH_HOST}:${SSH_PORT}     ║${NC}"
-echo -e "${GREEN}║   ADB : ${SERIAL}          ║${NC}"
-echo -e "${GREEN}║                                    ║${NC}"
-echo -e "${GREEN}╚════════════════════════════════════╝${NC}"
-echo ""
-
-# 1. Dependencies
-install_deps
-
-# 2. Test mail.tm
-echo -e "${CYAN}[*] Test mail.tm...${NC}"
-if ! curl -s --max-time 10 https://api.mail.tm/domains >/dev/null 2>&1; then
-    echo -e "${RED}[✗] Không kết nối được mail.tm${NC}"
-    exit 1
-fi
-echo -e "${GREEN}[✓] mail.tm OK${NC}"
-
-# 3. Kill cũ
-kill_tunnel
-
-# 4. SSH tunnel
-start_tunnel || exit 1
-
-# 5. ADB
-connect_adb || exit 1
-
-# 6. Farm loop
-echo ""
-echo -e "${GREEN}[🚀] Bắt đầu farm...${NC}"
-echo ""
-
-COUNT=1
-OK=0
-FAIL=0
-
-while true; do
-    if run_one $COUNT; then
-        OK=$((OK + 1))
-        COUNT=$((COUNT + 1))
-        echo -e "${GREEN}📊 OK: $OK | FAIL: $FAIL${NC}"
-    else
-        FAIL=$((FAIL + 1))
-        echo -e "${YELLOW}📊 OK: $OK | FAIL: $FAIL${NC}"
-        echo -e "${YELLOW}[!] Nghỉ 15s...${NC}"
-        sleep 15
-    fi
-    sleep 5
-done
-EOFMAIN
-
-chmod +x ~/pollo_farm.sh && ~/pollo_farm.sh
+    echo -e 
