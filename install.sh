@@ -4,7 +4,7 @@ cat > ~/pollo_farm.sh << 'EOF'
 PACKAGE="ai.pollo.ai"
 PASS="YourPassword123"
 INVITE="${INVITE:-}"
-SERIAL="localhost:9999"
+SERIAL="127.0.0.1:9999"  # Thay vì localhost:9999
 
 SSH_USER="10.12.11.115_1774374783100"
 SSH_HOST="98.98.37.2"
@@ -81,12 +81,17 @@ connect_adb() {
     echo -e "${CYAN}[*] ADB connect...${NC}"
     adb kill-server 2>/dev/null
     sleep 1
-    adb start-server 2>/dev/null
+    
+    # Ép dùng IPv4 thay vì localhost
+    ADB_SERVER_SOCKET=tcp:127.0.0.1:5037 adb start-server 2>/dev/null
     sleep 1
-    adb connect $SERIAL 2>/dev/null
+    
+    # Kết nối qua IP thay vì localhost
+    adb connect 127.0.0.1:9999 2>/dev/null
     sleep 2
-    if adb -s $SERIAL shell echo OK >/dev/null 2>&1; then
-        echo -e "${GREEN}[OK] ADB: $SERIAL${NC}"
+    
+    if adb -s 127.0.0.1:9999 shell echo OK >/dev/null 2>&1; then
+        echo -e "${GREEN}[OK] ADB: 127.0.0.1:9999${NC}"
         return 0
     else
         echo -e "${RED}[FAIL] ADB${NC}"
