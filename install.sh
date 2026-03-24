@@ -32,6 +32,33 @@ else
     exit 1
 fi
 
+# ================ PASSWORD TEST ================
+echo -e "${CYAN}[*] Testing SSH password...${NC}"
+
+TEMP_USER_HOST=$(echo "$CMD" | awk '{for(i=1;i<=NF;i++) if($i ~ /@/) print $i}')
+TEMP_USER=$(echo "$TEMP_USER_HOST" | cut -d@ -f1)
+TEMP_HOST=$(echo "$TEMP_USER_HOST" | cut -d@ -f2)
+TEMP_PORT=$(echo "$CMD" | awk '{for(i=1;i<=NF;i++) if($i=="-p") print $(i+1)}')
+
+export SSHPASS="$key"
+if timeout 15 sshpass -e ssh \
+    -oHostKeyAlgorithms=+ssh-rsa \
+    -oStrictHostKeyChecking=no \
+    -oConnectTimeout=10 \
+    ${TEMP_USER}@${TEMP_HOST} \
+    -p ${TEMP_PORT} \
+    "echo OK" 2>/dev/null | grep -q OK; then
+    echo -e "${GREEN}[✓] Password authentication successful${NC}"
+    unset SSHPASS
+else
+    echo -e "${RED}[✗] Password authentication FAILED${NC}"
+    echo "User: $TEMP_USER"
+    echo "Host: $TEMP_HOST"
+    echo "Port: $TEMP_PORT"
+    unset SSHPASS
+    exit 1
+fi
+
 # ================== Parse SSH info ==================
 if [ -n "$CMD" ]; then
     echo -e "${CYAN}[*] Parsing SSH config...${NC}"
@@ -54,8 +81,6 @@ if [ -n "$CMD" ]; then
     
     if [ -z "$SSH_USER" ] || [ -z "$SSH_HOST" ] || [ -z "$SSH_PORT" ] || [ -z "$LOCAL_PORT" ]; then
         echo -e "${RED}[ERROR] Parse failed!${NC}"
-        echo "USER_HOST: $USER_HOST"
-        echo "L_PARAM: $L_PARAM"
         exit 1
     fi
     
@@ -101,25 +126,28 @@ start_tunnel() {
     
     echo -e "${CYAN}[*] Connecting to ${SSH_USER}@${SSH_HOST}:${SSH_PORT}...${NC}"
     
-    SSH_OUTPUT=$(sshpass -p "$key" ssh \
-        -v \
+    # Dùng SSHPASS environment variable
+    export SSHPASS="$key"
+    
+    sshpass -e ssh \
         -oHostKeyAlgorithms=+ssh-rsa \
         -oStrictHostKeyChecking=no \
-        -oConnectTimeout=15 \
         -oServerAliveInterval=30 \
         -oServerAliveCountMax=3 \
         -L ${LOCAL_PORT}:${REMOTE_ADB} \
         -Nf \
         ${SSH_USER}@${SSH_HOST} \
-        -p ${SSH_PORT} 2>&1)
+        -p ${SSH_PORT}
     
-    if [ $? -eq 0 ]; then
+    SSH_EXIT=$?
+    unset SSHPASS
+    
+    if [ $SSH_EXIT -eq 0 ]; then
         echo -e "${GREEN}[OK] SSH tunnel established${NC}"
         sleep 2
         return 0
     else
-        echo -e "${RED}[FAIL] SSH tunnel${NC}"
-        echo "$SSH_OUTPUT" | grep -i "debug1\|denied\|error\|refused" | tail -10
+        echo -e "${RED}[FAIL] SSH tunnel (exit: $SSH_EXIT)${NC}"
         return 1
     fi
 }
@@ -439,7 +467,7 @@ run_one() {
 # ================== Main ==================
 clear
 echo -e "${GREEN}╔═══════════════════════════════════════════════╗${NC}"
-echo -e "${GREEN}║       POLLO FARM v3.3 (Dynamic Config)       ║${NC}"
+echo -e "${GREEN}║       POLLO FARM v3.4 (Fixed SSHPASS)        ║${NC}"
 echo -e "${GREEN}╠═══════════════════════════════════════════════╣${NC}"
 echo -e "${GREEN}║ SSH:    ${SSH_USER}@${SSH_HOST}:${SSH_PORT}${NC}"
 echo -e "${GREEN}║ Tunnel: localhost:${LOCAL_PORT} → ${REMOTE_ADB}${NC}"
