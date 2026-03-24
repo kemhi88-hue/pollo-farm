@@ -3,7 +3,7 @@ cat > ~/pollo_farm.sh << 'EOF'
 
 PACKAGE="ai.pollo.ai"
 PASS="YourPassword123"
-INVITE="L54v43"
+INVITE="bnqOrS"
 SERIAL="localhost:9163"
 
 APK_URL="https://videocdn.pollo.ai/app/android/Pollo.ai_Android.apk"
