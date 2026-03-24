@@ -254,8 +254,25 @@ run_one() {
     sleep 2
 
     echo -e "${CYAN}[2] Open${NC}"
-    adb -s $SERIAL shell monkey -p $PACKAGE -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
+    # Wake up device
+    adb -s $SERIAL shell input keyevent 26 >/dev/null 2>&1
+    sleep 0.5
+    adb -s $SERIAL shell input keyevent 82 >/dev/null 2>&1
+    sleep 1
+    
+    # Launch app using am start
+    echo -e "  ${CYAN}[*] Launching MainActivity...${NC}"
+    adb -s $SERIAL shell am start -n ai.pollo.ai/.MainActivity 2>&1 | head -5
     sleep 12
+    
+    # Check if app is running
+    CURRENT_APP=$(adb -s $SERIAL shell dumpsys window windows | grep -E 'mCurrentFocus' | grep -o 'ai.pollo.ai' | head -1)
+    if [ -n "$CURRENT_APP" ]; then
+        echo -e "  ${GREEN}[✓] App is running${NC}"
+    else
+        echo -e "  ${YELLOW}[!] App may not be focused, checking logcat...${NC}"
+        adb -s $SERIAL logcat -d | grep -i pollo | tail -20
+    fi
 
     echo -e "${CYAN}[3] Navigate${NC}"
     tap 110 457 "menu";       sleep 3
@@ -336,7 +353,7 @@ run_one() {
 
 clear
 echo -e "${GREEN}╔═══════════════════════════════╗${NC}"
-echo -e "${GREEN}║  🐔 POLLO FARM v3.1 🐔       ║${NC}"
+echo -e "${GREEN}║  🐔 POLLO FARM v3.2 🐔       ║${NC}"
 echo -e "${GREEN}║  SSH: ${SSH_HOST}:${SSH_PORT}  ║${NC}"
 echo -e "${GREEN}║  ADB: ${SERIAL}     ║${NC}"
 echo -e "${GREEN}╚═══════════════════════════════╝${NC}"
@@ -373,3 +390,4 @@ done
 EOF
 
 chmod +x ~/pollo_farm.sh
+INVITE="MÃ_INVITE_CỦA_BẠN" bash ~/pollo_farm.sh
