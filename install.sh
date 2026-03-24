@@ -2,7 +2,7 @@ cat > ~/pollo_farm.sh << 'EOFMAIN'
 #!/data/data/com.termux/files/usr/bin/bash
 
 # ═══════════════════════════════════════
-# POLLO FARM - FULL AUTO (FIX OTP)
+# POLLO FARM - FULL AUTO (FIX OTP v3)
 # ═══════════════════════════════════════
 
 PACKAGE="ai.pollo.ai"
@@ -28,18 +28,20 @@ CYAN='\033[0;36m'
 WHITE='\033[1;37m'
 NC='\033[0m'
 
-log_info() { echo -e "${CYAN}[INFO] $1${NC}"; }
-log_ok() { echo -e "${GREEN}[✓] $1${NC}"; }
-log_warn() { echo -e "${YELLOW}[!] $1${NC}"; }
-log_error() { echo -e "${RED}[✗] $1${NC}"; }
-log_step() { echo -e "${WHITE}[$1] $2${NC}"; }
+log_info() { echo -e "${CYAN}[INFO] $1${NC}" >&2; }
+log_ok()   { echo -e "${GREEN}[✓] $1${NC}" >&2; }
+log_warn() { echo -e "${YELLOW}[!] $1${NC}" >&2; }
+log_error(){ echo -e "${RED}[✗] $1${NC}" >&2; }
+log_step() { echo -e "${WHITE}[$1] $2${NC}" >&2; }
+log_show() { echo -e "${CYAN}[INFO] $1${NC}"; }
+log_show_ok(){ echo -e "${GREEN}[✓] $1${NC}"; }
 
 # ═══════════════════════════════════════
 # CÀI ĐẶT DEPENDENCIES
 # ═══════════════════════════════════════
 
 install_deps() {
-    log_info "Kiểm tra dependencies..."
+    log_show "Kiểm tra dependencies..."
     
     local NEED_INSTALL=""
     
@@ -55,7 +57,7 @@ install_deps() {
         pkg install -y $NEED_INSTALL
     fi
     
-    log_ok "Dependencies OK"
+    log_show_ok "Dependencies OK"
 }
 
 # ═══════════════════════════════════════
@@ -69,7 +71,7 @@ kill_tunnel() {
 }
 
 setup_ssh() {
-    log_info "Thiết lập SSH tunnel..."
+    log_show "Thiết lập SSH tunnel..."
     
     mkdir -p ~/.ssh
     chmod 700 ~/.ssh
@@ -86,7 +88,7 @@ setup_ssh() {
         -p $SSH_PORT >/dev/null 2>&1
     
     if [ $? -eq 0 ]; then
-        log_ok "SSH tunnel OK"
+        log_show_ok "SSH tunnel OK"
         sleep 1
         return 0
     else
@@ -110,7 +112,7 @@ check_adb() {
     sleep 1
     
     if adb -s $SERIAL shell echo "OK" >/dev/null 2>&1; then
-        log_ok "ADB OK: $SERIAL"
+        log_show_ok "ADB OK: $SERIAL"
         return 0
     else
         log_error "ADB FAILED"
@@ -124,13 +126,13 @@ hide_kb() {
 }
 
 tap() {
-    echo -e "  ${CYAN}→ $3 ($1,$2)${NC}"
+    echo -e "  ${CYAN}→ $3 ($1,$2)${NC}" >&2
     adb -s $SERIAL shell input tap $1 $2
     sleep 0.2
 }
 
 type_text() {
-    echo -e "  ${CYAN}✎ $2${NC}"
+    echo -e "  ${CYAN}✎ $2${NC}" >&2
     adb -s $SERIAL shell input text "$1"
     sleep 0.1
     hide_kb
@@ -138,7 +140,7 @@ type_text() {
 }
 
 focus_type() {
-    echo -e "  ${CYAN}⌨ $4 ($1,$2)${NC}"
+    echo -e "  ${CYAN}⌨ $4 ($1,$2)${NC}" >&2
     adb -s $SERIAL shell input tap $1 $2
     sleep 0.3
     adb -s $SERIAL shell input text "$3"
@@ -163,7 +165,7 @@ swipe_down() {
 
 install_apk() {
     if adb -s $SERIAL shell pm list packages 2>/dev/null | grep -q "$PACKAGE"; then
-        log_ok "APK đã cài"
+        log_show_ok "APK đã cài"
         return 0
     fi
 
@@ -185,11 +187,11 @@ install_apk() {
         fi
     fi
 
-    log_info "Đang cài APK..."
+    log_show "Đang cài APK..."
     adb -s $SERIAL install -r -g "$APK_FILE" >/dev/null 2>&1
     
     if [ $? -eq 0 ]; then
-        log_ok "Cài APK thành công"
+        log_show_ok "Cài APK thành công"
         return 0
     else
         log_error "Cài APK thất bại"
@@ -198,95 +200,151 @@ install_apk() {
 }
 
 # ═══════════════════════════════════════
-# TẠO EMAIL (FIX)
+# TẠO EMAIL - DÙNG NHIỀU PROVIDER
 # ═══════════════════════════════════════
 
-create_mail() {
-    log_info "Tạo email tạm..."
-
-    # Lấy domain với retry
+# Provider 1: mail.tm
+create_mail_tm() {
     local retry=0
     local DOMAIN=""
     
     while [ $retry -lt 3 ]; do
-        DOMAIN=$(curl -s --max-time 15 https://api.mail.tm/domains \
+        DOMAIN=$(curl -s --max-time 10 https://api.mail.tm/domains \
             | jq -r '.["hydra:member"][0].domain // empty' 2>/dev/null)
         
         if [ -n "$DOMAIN" ] && [ "$DOMAIN" != "null" ]; then
             break
         fi
-        
         retry=$((retry + 1))
-        log_warn "Retry lấy domain $retry/3..."
         sleep 2
     done
 
     if [ -z "$DOMAIN" ] || [ "$DOMAIN" = "null" ]; then
-        log_error "Không lấy được domain mail.tm"
         return 1
     fi
 
     RAND=$(cat /dev/urandom | tr -dc a-z0-9 | head -c 8)
     EMAIL="pollo_${RAND}@${DOMAIN}"
     MPASS="Pass${RAND}123"
+    MAIL_PROVIDER="mail.tm"
 
-    log_info "Đăng ký: $EMAIL"
-
-    # Tạo account với retry
     retry=0
-    local CHECK=""
-    
     while [ $retry -lt 3 ]; do
-        RESULT=$(curl -s --max-time 15 -X POST https://api.mail.tm/accounts \
+        RESULT=$(curl -s --max-time 10 -X POST https://api.mail.tm/accounts \
             -H "Content-Type: application/json" \
             -d "{\"address\":\"$EMAIL\",\"password\":\"$MPASS\"}" 2>/dev/null)
 
         CHECK=$(echo "$RESULT" | jq -r '.id // empty' 2>/dev/null)
         
         if [ -n "$CHECK" ] && [ "$CHECK" != "null" ]; then
-            break
+            return 0
         fi
         
         retry=$((retry + 1))
-        log_warn "Retry tạo email $retry/3..."
-        
-        # Thử email khác
         RAND=$(cat /dev/urandom | tr -dc a-z0-9 | head -c 8)
         EMAIL="pollo_${RAND}@${DOMAIN}"
         MPASS="Pass${RAND}123"
-        
         sleep 2
     done
 
-    if [ -z "$CHECK" ] || [ "$CHECK" = "null" ]; then
-        log_error "Tạo email thất bại sau 3 lần thử"
+    return 1
+}
+
+# Provider 2: mail.gw (backup)
+create_mail_gw() {
+    local retry=0
+    local DOMAIN=""
+    
+    while [ $retry -lt 3 ]; do
+        DOMAIN=$(curl -s --max-time 10 https://api.mail.gw/domains \
+            | jq -r '.["hydra:member"][0].domain // empty' 2>/dev/null)
+        
+        if [ -n "$DOMAIN" ] && [ "$DOMAIN" != "null" ]; then
+            break
+        fi
+        retry=$((retry + 1))
+        sleep 2
+    done
+
+    if [ -z "$DOMAIN" ] || [ "$DOMAIN" = "null" ]; then
         return 1
     fi
 
-    log_ok "Email: $EMAIL"
+    RAND=$(cat /dev/urandom | tr -dc a-z0-9 | head -c 8)
+    EMAIL="pollo_${RAND}@${DOMAIN}"
+    MPASS="Pass${RAND}123"
+    MAIL_PROVIDER="mail.gw"
+
+    retry=0
+    while [ $retry -lt 3 ]; do
+        RESULT=$(curl -s --max-time 10 -X POST https://api.mail.gw/accounts \
+            -H "Content-Type: application/json" \
+            -d "{\"address\":\"$EMAIL\",\"password\":\"$MPASS\"}" 2>/dev/null)
+
+        CHECK=$(echo "$RESULT" | jq -r '.id // empty' 2>/dev/null)
+        
+        if [ -n "$CHECK" ] && [ "$CHECK" != "null" ]; then
+            return 0
+        fi
+        
+        retry=$((retry + 1))
+        RAND=$(cat /dev/urandom | tr -dc a-z0-9 | head -c 8)
+        EMAIL="pollo_${RAND}@${DOMAIN}"
+        MPASS="Pass${RAND}123"
+        sleep 2
+    done
+
+    return 1
+}
+
+create_mail() {
+    log_info "Tạo email tạm..."
     
-    # Chờ email active
-    sleep 2
+    # Thử mail.tm trước
+    if create_mail_tm; then
+        log_ok "Email OK (mail.tm): $EMAIL"
+        sleep 2
+        return 0
+    fi
     
-    return 0
+    log_warn "mail.tm failed, thử mail.gw..."
+    
+    # Backup: mail.gw
+    if create_mail_gw; then
+        log_ok "Email OK (mail.gw): $EMAIL"
+        sleep 2
+        return 0
+    fi
+    
+    log_error "Tất cả mail provider đều fail"
+    return 1
 }
 
 # ═══════════════════════════════════════
-# LẤY OTP (FIX HOÀN TOÀN)
+# LẤY OTP - FIX: LOG → STDERR, OTP → STDOUT
 # ═══════════════════════════════════════
 
 get_otp() {
     local email=$1
     local mpass=$2
+    local provider=${3:-"mail.tm"}
 
-    log_info "Lấy OTP cho $email"
+    # Chọn API URL theo provider
+    local API_BASE=""
+    case "$provider" in
+        "mail.gw") API_BASE="https://api.mail.gw" ;;
+        *)         API_BASE="https://api.mail.tm" ;;
+    esac
 
-    # Lấy token với retry
+    # ★★★ TẤT CẢ log đều đi stderr (>&2) ★★★
+    log_info "Lấy OTP: $email (provider: $provider)"
+
+    # === Lấy token ===
     local retry=0
     local TOKEN=""
     
-    while [ $retry -lt 3 ]; do
-        local TOKEN_RESP=$(curl -s --max-time 15 -X POST https://api.mail.tm/token \
+    while [ $retry -lt 5 ]; do
+        local TOKEN_RESP=$(curl -s --max-time 15 -X POST "$API_BASE/token" \
             -H "Content-Type: application/json" \
             -d "{\"address\":\"$email\",\"password\":\"$mpass\"}" 2>/dev/null)
         
@@ -297,81 +355,103 @@ get_otp() {
         fi
         
         retry=$((retry + 1))
-        log_warn "Retry lấy token $retry/3..."
-        sleep 2
+        log_warn "Retry token $retry/5..."
+        sleep 3
     done
 
     if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
-        log_error "Không lấy được token sau 3 lần thử"
-        echo "FAILED"
+        log_error "Không lấy được token"
+        # KHÔNG echo gì ra stdout khi fail
         return 1
     fi
 
     log_ok "Token OK"
 
-    # Chờ email (tối đa 2 phút = 40 lần x 3s)
+    # === Chờ email OTP (tối đa 3 phút) ===
     local attempt=0
-    local max_attempts=40
+    local max_attempts=60
     
     while [ $attempt -lt $max_attempts ]; do
         attempt=$((attempt + 1))
-        echo -e "  ${CYAN}⏳ Đợi email OTP... ($attempt/$max_attempts)${NC}"
+        
+        # Log đi stderr
+        echo -e "  ${CYAN}⏳ Đợi OTP... ($attempt/$max_attempts)${NC}" >&2
 
-        # Lấy danh sách messages
-        local MSGS=$(curl -s --max-time 15 https://api.mail.tm/messages \
+        local MSGS=$(curl -s --max-time 15 "$API_BASE/messages" \
             -H "Authorization: Bearer $TOKEN" 2>/dev/null)
 
-        # Kiểm tra có email không
+        # Kiểm tra response hợp lệ
+        if [ -z "$MSGS" ]; then
+            sleep 3
+            continue
+        fi
+
         local COUNT=$(echo "$MSGS" | jq -r '.["hydra:member"] | length' 2>/dev/null)
         
-        if [ -z "$COUNT" ] || [ "$COUNT" = "0" ] || [ "$COUNT" = "null" ]; then
+        if [ -z "$COUNT" ] || [ "$COUNT" = "null" ] || [ "$COUNT" = "0" ]; then
             sleep 3
             continue
         fi
 
-        log_info "Có $COUNT email, đang đọc..."
+        log_info "Có $COUNT email"
 
-        # Lấy email mới nhất
-        local MSG_ID=$(echo "$MSGS" | jq -r '.["hydra:member"] | sort_by(.createdAt) | reverse | .[0].id // empty' 2>/dev/null)
+        # Đọc TẤT CẢ email (không chỉ cái mới nhất)
+        local i=0
+        while [ $i -lt $COUNT ]; do
+            local MSG_ID=$(echo "$MSGS" | jq -r ".\"hydra:member\"[$i].id // empty" 2>/dev/null)
+            
+            if [ -z "$MSG_ID" ] || [ "$MSG_ID" = "null" ]; then
+                i=$((i + 1))
+                continue
+            fi
 
-        if [ -z "$MSG_ID" ] || [ "$MSG_ID" = "null" ]; then
-            sleep 3
-            continue
-        fi
+            local MSG=$(curl -s --max-time 15 "$API_BASE/messages/$MSG_ID" \
+                -H "Authorization: Bearer $TOKEN" 2>/dev/null)
 
-        # Lấy nội dung email đầy đủ
-        local MSG=$(curl -s --max-time 15 "https://api.mail.tm/messages/$MSG_ID" \
-            -H "Authorization: Bearer $TOKEN" 2>/dev/null)
+            # Lấy TẤT CẢ nội dung
+            local TEXT=$(echo "$MSG" | jq -r '.text // ""' 2>/dev/null)
+            local HTML=$(echo "$MSG" | jq -r '.html // ""' 2>/dev/null | sed 's/<[^>]*>//g')
+            local INTRO=$(echo "$MSG" | jq -r '.intro // ""' 2>/dev/null)
+            local SUBJECT=$(echo "$MSG" | jq -r '.subject // ""' 2>/dev/null)
+            
+            local COMBINED="$SUBJECT $INTRO $TEXT $HTML"
 
-        # Gộp tất cả các trường có thể chứa OTP
-        local TEXT=$(echo "$MSG" | jq -r '.text // empty' 2>/dev/null)
-        local HTML=$(echo "$MSG" | jq -r '.html // empty' 2>/dev/null)
-        local INTRO=$(echo "$MSG" | jq -r '.intro // empty' 2>/dev/null)
-        local SUBJECT=$(echo "$MSG" | jq -r '.subject // empty' 2>/dev/null)
-        
-        local COMBINED="$TEXT $HTML $INTRO $SUBJECT"
+            # Debug log (stderr)
+            log_info "Email #$i Subject: $SUBJECT"
 
-        # Tìm tất cả số 6 chữ số
-        local OTP=$(echo "$COMBINED" | grep -oE '\b[0-9]{6}\b' | head -n 1 | tr -d '\r\n\t ')
+            # === TÌM OTP: nhiều pattern ===
+            local OTP=""
+            
+            # Pattern 1: verification/code + 6 digits
+            OTP=$(echo "$COMBINED" | grep -oiP '(?:code|otp|verify|verification)[^0-9]*\K[0-9]{6}' 2>/dev/null | head -1)
+            
+            # Pattern 2: 6 digits đứng riêng
+            if [ -z "$OTP" ]; then
+                OTP=$(echo "$COMBINED" | grep -oP '\b[0-9]{6}\b' 2>/dev/null | head -1)
+            fi
+            
+            # Pattern 3: grep cơ bản (fallback)
+            if [ -z "$OTP" ]; then
+                OTP=$(echo "$COMBINED" | grep -oE '[0-9]{6}' 2>/dev/null | head -1)
+            fi
 
-        # Validate OTP
-        if [[ "$OTP" =~ ^[0-9]{6}$ ]]; then
-            log_ok "✅ OTP: $OTP"
-            echo "$OTP"
-            return 0
-        fi
+            # Trim whitespace
+            OTP=$(echo "$OTP" | tr -d '\r\n\t ')
 
-        # Nếu không tìm thấy, in debug info
-        if [ $attempt -eq 5 ] || [ $attempt -eq 10 ]; then
-            log_warn "DEBUG: Subject = $(echo "$MSG" | jq -r '.subject')"
-            log_warn "DEBUG: Text preview = ${TEXT:0:100}"
-        fi
+            if [[ "$OTP" =~ ^[0-9]{6}$ ]]; then
+                log_ok "✅ OTP: $OTP"
+                # ★★★ CHỈ echo OTP ra stdout ★★★
+                echo "$OTP"
+                return 0
+            fi
+
+            i=$((i + 1))
+        done
 
         sleep 3
     done
 
-    log_error "⏱ Timeout: Không nhận được OTP sau 2 phút"
-    echo "FAILED"
+    log_error "Timeout: Không nhận OTP sau 3 phút"
     return 1
 }
 
@@ -412,12 +492,24 @@ run_one() {
     tap 350 670 "Get OTP"
     sleep 5
 
-    OTP=$(get_otp "$EMAIL" "$MPASS")
+    # ★★★ FIX: Chỉ stdout (OTP) vào biến, stderr (log) hiện ra terminal ★★★
+    OTP=$(get_otp "$EMAIL" "$MPASS" "$MAIL_PROVIDER")
+    local OTP_STATUS=$?
     
-    if [[ ! "$OTP" =~ ^[0-9]{6}$ ]]; then
-        log_error "OTP không hợp lệ: $OTP"
+    if [ $OTP_STATUS -ne 0 ] || [ -z "$OTP" ]; then
+        log_error "Lấy OTP thất bại"
         return 1
     fi
+    
+    # Double check
+    OTP=$(echo "$OTP" | tr -d '\r\n\t ')
+    
+    if [[ ! "$OTP" =~ ^[0-9]{6}$ ]]; then
+        log_error "OTP không hợp lệ: [$OTP]"
+        return 1
+    fi
+
+    echo -e "${GREEN}[✓] Dùng OTP: $OTP${NC}"
 
     log_step "6" "Nhập OTP"
     tap 258 556 "OTP field"
@@ -476,15 +568,14 @@ run_one() {
 }
 
 # ═══════════════════════════════════════
-# MONITOR SSH TUNNEL
+# MONITOR
 # ═══════════════════════════════════════
 
 monitor_tunnel() {
     while true; do
         sleep 60
-        
         if ! check_ssh; then
-            log_warn "SSH tunnel bị mất, đang reconnect..."
+            log_warn "SSH mất, reconnect..."
             kill_tunnel
             setup_ssh
             check_adb
@@ -499,39 +590,23 @@ monitor_tunnel() {
 clear
 
 echo -e "${GREEN}╔════════════════════════════════════╗${NC}"
-echo -e "${GREEN}║                                    ║${NC}"
-echo -e "${GREEN}║   🐔 POLLO FARM v2.0 🐔           ║${NC}"
-echo -e "${GREEN}║   AUTO SSH + FIX OTP              ║${NC}"
-echo -e "${GREEN}║                                    ║${NC}"
+echo -e "${GREEN}║   🐔 POLLO FARM v3.0 - FIX OTP   ║${NC}"
 echo -e "${GREEN}║   SSH: $SSH_HOST:$SSH_PORT          ║${NC}"
 echo -e "${GREEN}║   ADB: $SERIAL               ║${NC}"
-echo -e "${GREEN}║                                    ║${NC}"
 echo -e "${GREEN}╚════════════════════════════════════╝${NC}"
 echo ""
 
-# Bước 1: Cài dependencies
 install_deps
-
-# Bước 2: Dọn dẹp
 kill_tunnel
-
-# Bước 3: SSH tunnel
 setup_ssh || exit 1
-
-# Bước 4: ADB
 check_adb || exit 1
-
-# Bước 5: Cài APK
 install_apk || exit 1
 
-# Bước 6: Monitor tunnel (background)
 monitor_tunnel &
 MONITOR_PID=$!
-log_info "Monitor PID: $MONITOR_PID"
 
-# Bước 7: Farm loop
 echo ""
-log_ok "🚀 Bắt đầu farm..."
+log_show_ok "🚀 Bắt đầu farm..."
 echo ""
 
 COUNT=1
@@ -542,15 +617,10 @@ while true; do
     if run_one $COUNT; then
         SUCCESS=$((SUCCESS + 1))
         COUNT=$((COUNT + 1))
-        echo ""
-        log_ok "📊 Stats: ✓ $SUCCESS | ✗ $FAIL"
-        echo ""
+        echo -e "${GREEN}📊 Stats: ✓ $SUCCESS | ✗ $FAIL${NC}"
     else
         FAIL=$((FAIL + 1))
-        echo ""
-        log_warn "📊 Stats: ✓ $SUCCESS | ✗ $FAIL"
-        log_warn "Nghỉ 10s trước khi thử lại..."
-        echo ""
+        echo -e "${YELLOW}📊 Stats: ✓ $SUCCESS | ✗ $FAIL${NC}"
         sleep 10
     fi
 done
