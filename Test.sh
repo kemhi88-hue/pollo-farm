@@ -1,19 +1,20 @@
 cat > ~/pollo_farm.sh << 'EOF'
 #!/bin/bash
+CMD="${CMD:-}"
+if [ -n "$CMD" ]; then
+    SSH_USER=$(echo "$CMD" | grep -oP '\S+@\S+' | cut -d@ -f1)
+    SSH_HOST=$(echo "$CMD" | grep -oP '\S+@\S+' | cut -d@ -f2)
+    SSH_PORT=$(echo "$CMD" | grep -oP '-p\s+\K[0-9]+')
+    LOCAL_PORT=$(echo "$CMD" | grep -oP '-L\s+\K[0-9]+')
+    REMOTE_ADB=$(echo "$CMD" | grep -oP '-L\s+[0-9]+:\K[^ ]+')
+    SERIAL="localhost:${LOCAL_PORT}"
+fi
 
 PACKAGE="ai.pollo.ai"
 PASS="YourPassword123"
 INVITE="${INVITE:-abc123}"
-SERIAL="localhost:9163"
 
-SERIAL="localhost:8156"
-
-SSH_USER="10.9.54.40_1774362928114"
-SSH_HOST="162.128.224.130"
-SSH_PORT="1824"
-SSH_PASS="O5sFJc2nZ+gjbrXc5mlGCZCcxR/xGOeC3BM9NRfTpoWtLIVgYLL9zeqUKekEyYFyUxzeJxLIq4iiNT3JnSsA6w=="
-LOCAL_PORT="8156"
-REMOTE_ADB="adb-proxy:17682"
+key="${key:-}"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
