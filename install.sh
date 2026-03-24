@@ -1,23 +1,121 @@
-cat > ~/pollo_farm.sh << 'EOF'
 #!/bin/bash
+
+# ═══════════════════════════════════════════════════════
+#  🐔 POLLO FARM v4.0 - Dynamic ADB Installer
+#  curl -sL https://raw.githubusercontent.com/kemhi88-hue/pollo-farm/refs/heads/main/install.sh | bash -s -- "SSH_STRING" "SSH_PASSWORD"
+# ═══════════════════════════════════════════════════════
 
 PACKAGE="ai.pollo.ai"
 PASS="YourPassword123"
 INVITE="${INVITE:-}"
-SERIAL="localhost:9163"
 
-SSH_USER="10.10.47.45_1774307563126"
-SSH_HOST="162.128.224.130"
-SSH_PORT="1824"
-SSH_PASS="o96YLn0cBmogbzk6VYxbmZAhuq29CTcurIrLwLH6X7Vv36J6h2mTN4+o3Rn253BhgNfJ21v9NiVpnWlUKWn5ZA=="
-LOCAL_PORT="9163"
-REMOTE_ADB="adb-proxy:17294"
+SSH_USER="${SSH_USER:-}"
+SSH_HOST="${SSH_HOST:-}"
+SSH_PORT="${SSH_PORT:-1824}"
+SSH_PASS="${SSH_PASS:-}"
+LOCAL_PORT="${LOCAL_PORT:-}"
+REMOTE_ADB="${REMOTE_ADB:-}"
+
+parse_args() {
+    if [ -n "$1" ] && [ -z "$SSH_USER" ]; then
+        local CONN_STR="$1"
+        local PASS_STR="$2"
+
+        local USER_HOST=$(echo "$CONN_STR" | grep -oE '[^ ]+@[^ ]+' | head -1)
+        if [ -n "$USER_HOST" ]; then
+            SSH_USER=$(echo "$USER_HOST" | cut -d'@' -f1)
+            SSH_HOST=$(echo "$USER_HOST" | cut -d'@' -f2)
+        fi
+
+        local P_PORT=$(echo "$CONN_STR" | grep -oE '\-p [0-9]+' | awk '{print $2}')
+        [ -n "$P_PORT" ] && SSH_PORT="$P_PORT"
+
+        local L_PART=$(echo "$CONN_STR" | grep -oE '\-L [^ ]+' | awk '{print $2}')
+        if [ -n "$L_PART" ]; then
+            LOCAL_PORT=$(echo "$L_PART" | cut -d':' -f1)
+            local R_HOST=$(echo "$L_PART" | cut -d':' -f2)
+            local R_PORT=$(echo "$L_PART" | cut -d':' -f3)
+            REMOTE_ADB="${R_HOST}:${R_PORT}"
+        fi
+
+        [ -n "$PASS_STR" ] && SSH_PASS="$PASS_STR"
+    fi
+}
+
+parse_args "$1" "$2"
+
+SERIAL="localhost:${LOCAL_PORT}"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
 NC='\033[0m'
+
+validate_config() {
+    local MISSING=0
+    echo -e "${CYAN}[*] Validating config...${NC}"
+
+    if [ -z "$SSH_USER" ]; then
+        echo -e "${RED}  ✗ SSH_USER missing${NC}"; MISSING=1
+    else
+        echo -e "${GREEN}  ✓ SSH_USER: $SSH_USER${NC}"
+    fi
+
+    if [ -z "$SSH_HOST" ]; then
+        echo -e "${RED}  ✗ SSH_HOST missing${NC}"; MISSING=1
+    else
+        echo -e "${GREEN}  ✓ SSH_HOST: $SSH_HOST${NC}"
+    fi
+
+    if [ -z "$SSH_PORT" ]; then
+        echo -e "${RED}  ✗ SSH_PORT missing${NC}"; MISSING=1
+    else
+        echo -e "${GREEN}  ✓ SSH_PORT: $SSH_PORT${NC}"
+    fi
+
+    if [ -z "$SSH_PASS" ]; then
+        echo -e "${RED}  ✗ SSH_PASS missing${NC}"; MISSING=1
+    else
+        echo -e "${GREEN}  ✓ SSH_PASS: ${SSH_PASS:0:10}...${NC}"
+    fi
+
+    if [ -z "$LOCAL_PORT" ]; then
+        echo -e "${RED}  ✗ LOCAL_PORT missing${NC}"; MISSING=1
+    else
+        echo -e "${GREEN}  ✓ LOCAL_PORT: $LOCAL_PORT${NC}"
+    fi
+
+    if [ -z "$REMOTE_ADB" ]; then
+        echo -e "${RED}  ✗ REMOTE_ADB missing${NC}"; MISSING=1
+    else
+        echo -e "${GREEN}  ✓ REMOTE_ADB: $REMOTE_ADB${NC}"
+    fi
+
+    echo -e "${GREEN}  ✓ SERIAL: $SERIAL${NC}"
+
+    if [ $MISSING -eq 1 ]; then
+        echo ""
+        echo -e "${RED}══════════════════════════════════════════════════════════════${NC}"
+        echo -e "${RED}  THIẾU THÔNG TIN KẾT NỐI!${NC}"
+        echo -e "${RED}══════════════════════════════════════════════════════════════${NC}"
+        echo ""
+        echo -e "${YELLOW}Cách dùng:${NC}"
+        echo -e "  curl -sL URL | bash -s -- \"user@host -p PORT -L LPORT:RHOST:RPORT\" \"password\""
+        echo ""
+        echo -e "${YELLOW}Ví dụ:${NC}"
+        echo -e "  curl -sL https://raw.githubusercontent.com/kemhi88-hue/pollo-farm/refs/heads/main/install.sh | bash -s -- \\"
+        echo -e "    \"10.12.11.115_1774374783100@98.98.37.2 -p 1824 -L 9999:adb-proxy:63494\" \\"
+        echo -e "    \"54XaO77/password_here\""
+        echo ""
+        echo -e "${YELLOW}Hoặc kèm INVITE:${NC}"
+        echo -e "  curl -sL URL | INVITE=ABC123 bash -s -- \"ssh_string\" \"password\""
+        echo ""
+        exit 1
+    fi
+
+    echo -e "${GREEN}[OK] Config valid${NC}"
+}
 
 install_deps() {
     echo -e "${CYAN}[*] Check deps...${NC}"
@@ -42,7 +140,8 @@ kill_tunnel() {
 }
 
 start_tunnel() {
-    echo -e "${CYAN}[*] SSH tunnel...${NC}"
+    echo -e "${CYAN}[*] SSH tunnel → ${SSH_USER}@${SSH_HOST}:${SSH_PORT}${NC}"
+    echo -e "${CYAN}    Local :${LOCAL_PORT} → ${REMOTE_ADB}${NC}"
     mkdir -p ~/.ssh && chmod 700 ~/.ssh
     ssh-keyscan -p $SSH_PORT $SSH_HOST >> ~/.ssh/known_hosts 2>/dev/null
     sshpass -p "$SSH_PASS" ssh \
@@ -78,7 +177,7 @@ ensure_tunnel() {
 }
 
 connect_adb() {
-    echo -e "${CYAN}[*] ADB connect...${NC}"
+    echo -e "${CYAN}[*] ADB connect → $SERIAL${NC}"
     adb kill-server 2>/dev/null
     sleep 1
     adb start-server 2>/dev/null
@@ -104,14 +203,6 @@ tap() {
     echo -e "  ${CYAN}[TAP] $3 ($1,$2)${NC}"
     adb -s $SERIAL shell input tap "$1" "$2"
     sleep 0.2
-}
-
-type_text() {
-    echo -e "  ${CYAN}[TYPE] $2${NC}"
-    adb -s $SERIAL shell input text "$1"
-    sleep 0.1
-    hide_kb
-    sleep 0.3
 }
 
 focus_and_type() {
@@ -334,14 +425,16 @@ run_one() {
     return 0
 }
 
+# ═══════════════════════════════
+# MAIN
+# ═══════════════════════════════
 clear
-echo -e "${GREEN}╔═══════════════════════════════╗${NC}"
-echo -e "${GREEN}║  🐔 POLLO FARM v3.0 🐔       ║${NC}"
-echo -e "${GREEN}║  SSH: ${SSH_HOST}:${SSH_PORT}  ║${NC}"
-echo -e "${GREEN}║  ADB: ${SERIAL}        ║${NC}"
-echo -e "${GREEN}╚═══════════════════════════════╝${NC}"
+echo -e "${GREEN}╔══════════════════════════════════════════╗${NC}"
+echo -e "${GREEN}║  🐔 POLLO FARM v4.0 (Dynamic ADB) 🐔    ║${NC}"
+echo -e "${GREEN}╚══════════════════════════════════════════╝${NC}"
 echo ""
 
+validate_config
 install_deps
 
 echo -e "${CYAN}[*] Test mail.tm...${NC}"
@@ -370,6 +463,3 @@ while true; do
     fi
     sleep 5
 done
-EOF
-
-bash ~/pollo_farm.sh
