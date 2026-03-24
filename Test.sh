@@ -1,6 +1,15 @@
 cat > ~/pollo_farm.sh << 'EOF'
 #!/bin/bash
 CMD="${CMD:-}"
+key="${key:-}"
+if [ -n "$CMD" ]; then
+    CMD=$(echo "$CMD" | base64 --decode)
+fi
+
+if [ -n "$key" ]; then
+    key=$(echo "$key" | base64 --decode)
+fi
+
 if [ -n "$CMD" ]; then
     SSH_USER=$(echo "$CMD" | grep -oP '\S+@\S+' | cut -d@ -f1)
     SSH_HOST=$(echo "$CMD" | grep -oP '\S+@\S+' | cut -d@ -f2)
@@ -11,10 +20,10 @@ if [ -n "$CMD" ]; then
 fi
 
 PACKAGE="ai.pollo.ai"
-PASS="YourPassword123"
+PASS="111111"
 INVITE="${INVITE:-abc123}"
 
-key="${key:-}"
+
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
