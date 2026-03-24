@@ -1,4 +1,3 @@
-cat > ~/pollo_farm.sh << 'EOF'
 #!/bin/bash
 
 # ================== Variables ==================
@@ -19,8 +18,7 @@ echo -e "${CYAN}[*] Decoding variables...${NC}"
 
 if [ -n "$CMD" ]; then
     CMD=$(echo "$CMD" | base64 --decode)
-    echo -e "${GREEN}[OK] Decoded CMD:${NC}"
-    echo "  $CMD"
+    echo -e "${GREEN}[OK] Decoded CMD:${NC} $CMD"
 else
     echo -e "${RED}[ERROR] CMD is empty!${NC}"
     exit 1
@@ -45,17 +43,12 @@ if [ -n "$CMD" ]; then
     REMOTE_ADB=$(echo "$CMD" | grep -oP '-L\s+[0-9]+:\K[^ ]+')
     SERIAL="localhost:${LOCAL_PORT}"
     
-    echo -e "${GREEN}[OK] Parsed SSH info:${NC}"
-    echo "  SSH_USER    = ${SSH_USER}"
-    echo "  SSH_HOST    = ${SSH_HOST}"
-    echo "  SSH_PORT    = ${SSH_PORT}"
-    echo "  LOCAL_PORT  = ${LOCAL_PORT}"
-    echo "  REMOTE_ADB  = ${REMOTE_ADB}"
-    echo "  SERIAL      = ${SERIAL}"
+    echo -e "${GREEN}[OK] Parsed:${NC}"
+    echo "  User: ${SSH_USER} | Host: ${SSH_HOST} | Port: ${SSH_PORT}"
+    echo "  Local: ${LOCAL_PORT} | Remote ADB: ${REMOTE_ADB}"
     
-    # Kiểm tra biến rỗng
     if [ -z "$SSH_USER" ] || [ -z "$SSH_HOST" ] || [ -z "$SSH_PORT" ]; then
-        echo -e "${RED}[ERROR] Failed to parse SSH info!${NC}"
+        echo -e "${RED}[ERROR] Parse failed!${NC}"
         exit 1
     fi
 fi
@@ -88,13 +81,10 @@ start_tunnel() {
     echo -e "${CYAN}[*] Starting SSH tunnel...${NC}"
     
     mkdir -p ~/.ssh && chmod 700 ~/.ssh
-    
-    # Thêm host key
-    echo -e "${CYAN}[*] Adding host key for ${SSH_HOST}:${SSH_PORT}...${NC}"
     ssh-keyscan -p $SSH_PORT $SSH_HOST >> ~/.ssh/known_hosts 2>&1
     
-    # Test kết nối với verbose
-    echo -e "${CYAN}[*] Testing SSH connection...${NC}"
+    echo -e "${CYAN}[*] Connecting to ${SSH_USER}@${SSH_HOST}:${SSH_PORT}...${NC}"
+    
     SSH_OUTPUT=$(sshpass -p "$key" ssh \
         -v \
         -oHostKeyAlgorithms=+ssh-rsa \
@@ -107,33 +97,25 @@ start_tunnel() {
         ${SSH_USER}@${SSH_HOST} \
         -p ${SSH_PORT} 2>&1)
     
-    SSH_EXIT=$?
-    
-    if [ $SSH_EXIT -eq 0 ]; then
-        echo -e "${GREEN}[OK] SSH tunnel established${NC}"
+    if [ $? -eq 0 ]; then
+        echo -e "${GREEN}[OK] SSH tunnel${NC}"
         sleep 2
         return 0
     else
-        echo -e "${RED}╔════════════════════════════════════════════════════════════╗${NC}"
-        echo -e "${RED}║               SSH TUNNEL FAILED (exit: $SSH_EXIT)              ║${NC}"
-        echo -e "${RED}╚════════════════════════════════════════════════════════════╝${NC}"
-        echo -e "${YELLOW}[ERROR DETAILS]${NC}"
-        echo "$SSH_OUTPUT" | grep -E "debug1|Permission denied|Connection refused|Network|timeout" | tail -15
-        echo -e "${RED}════════════════════════════════════════════════════════════${NC}"
+        echo -e "${RED}╔═══════════ SSH TUNNEL FAILED ═══════════╗${NC}"
+        echo -e "${RED}║ Exit code: $?                            ║${NC}"
+        echo -e "${RED}╚═════════════════════════════════════════╝${NC}"
+        echo -e "${YELLOW}Error output:${NC}"
+        echo "$SSH_OUTPUT" | grep -i "debug1\|denied\|refused\|timeout\|unreachable" | tail -10
         
-        # Thử ping host
-        echo -e "${CYAN}[*] Testing network to ${SSH_HOST}...${NC}"
-        if ping -c 2 -W 3 $SSH_HOST >/dev/null 2>&1; then
-            echo -e "${GREEN}[OK] Host is reachable${NC}"
-        else
-            echo -e "${RED}[FAIL] Cannot reach host${NC}"
-        fi
+        echo -e "${CYAN}[*] Network test...${NC}"
+        ping -c 2 -W 2 $SSH_HOST >/dev/null 2>&1 && \
+            echo -e "${GREEN}✓ Host reachable${NC}" || \
+            echo -e "${RED}✗ Host unreachable${NC}"
         
-        # Thử telnet port
-        echo -e "${CYAN}[*] Testing port ${SSH_PORT}...${NC}"
         timeout 3 bash -c "echo > /dev/tcp/${SSH_HOST}/${SSH_PORT}" 2>/dev/null && \
-            echo -e "${GREEN}[OK] Port is open${NC}" || \
-            echo -e "${RED}[FAIL] Port is closed/filtered${NC}"
+            echo -e "${GREEN}✓ Port ${SSH_PORT} open${NC}" || \
+            echo -e "${RED}✗ Port ${SSH_PORT} closed${NC}"
         
         return 1
     fi
@@ -171,8 +153,6 @@ connect_adb() {
     fi
 }
 
-# ... (phần còn lại giữ nguyên)
-EOF
 hide_kb() {
     adb -s $SERIAL shell input keyevent 4 >/dev/null 2>&1
     sleep 0.1
@@ -182,14 +162,6 @@ tap() {
     echo -e "  ${CYAN}[TAP] $3 ($1,$2)${NC}"
     adb -s $SERIAL shell input tap "$1" "$2"
     sleep 0.2
-}
-
-type_text() {
-    echo -e "  ${CYAN}[TYPE] $2${NC}"
-    adb -s $SERIAL shell input text "$1"
-    sleep 0.1
-    hide_kb
-    sleep 0.3
 }
 
 focus_and_type() {
@@ -202,12 +174,12 @@ focus_and_type() {
     sleep 0.3
 }
 
-# ================== APK Install (ĐÃ SỬA) ==================
+# ================== APK Install ==================
 install_apk() {
-    echo -e "${CYAN}[*] Checking Pollo.ai APK...${NC}"
+    echo -e "${CYAN}[*] Checking APK...${NC}"
     
     if adb -s "$SERIAL" shell pm list packages 2>/dev/null | grep -q "$PACKAGE"; then
-        echo -e "${GREEN}[OK] APK already installed${NC}"
+        echo -e "${GREEN}[OK] APK installed${NC}"
         return 0
     fi
 
@@ -216,21 +188,12 @@ install_apk() {
     if [ ! -f "$TMP_APK" ]; then
         echo -e "${CYAN}[*] Downloading APK...${NC}"
         curl -L -o "$TMP_APK" "https://videocdn.pollo.ai/app/android/Pollo.ai_Android.apk"
-        if [ $? -ne 0 ] || [ ! -f "$TMP_APK" ]; then
-            echo -e "${RED}[FAIL] Download APK${NC}"
-            return 1
-        fi
+        [ $? -ne 0 ] && echo -e "${RED}[FAIL] Download${NC}" && return 1
     fi
 
     echo -e "${CYAN}[*] Installing APK...${NC}"
     adb -s "$SERIAL" install -r "$TMP_APK"
-    if [ $? -eq 0 ]; then
-        echo -e "${GREEN}[OK] APK installed${NC}"
-        return 0
-    else
-        echo -e "${RED}[FAIL] APK install${NC}"
-        return 1
-    fi
+    [ $? -eq 0 ] && echo -e "${GREEN}[OK] Installed${NC}" || { echo -e "${RED}[FAIL] Install${NC}"; return 1; }
 }
 
 # ================== Mail/OTP ==================
@@ -239,8 +202,7 @@ create_mail() {
     local retry=0
     DOMAIN=""
     while [ $retry -lt 5 ]; do
-        DOMAIN=$(curl -s --max-time 10 https://api.mail.tm/domains \
-            | jq -r '.["hydra:member"][0].domain // empty' 2>/dev/null)
+        DOMAIN=$(curl -s --max-time 10 https://api.mail.tm/domains | jq -r '.["hydra:member"][0].domain // empty' 2>/dev/null)
         [ -n "$DOMAIN" ] && [ "$DOMAIN" != "null" ] && break
         retry=$((retry+1))
         sleep 2
@@ -252,7 +214,6 @@ create_mail() {
     MPASS="Xk${RAND}99"
 
     retry=0
-    local CHECK=""
     while [ $retry -lt 3 ]; do
         RESULT=$(curl -s --max-time 10 -X POST https://api.mail.tm/accounts \
             -H "Content-Type: application/json" \
@@ -267,19 +228,15 @@ create_mail() {
     done
     [ -z "$CHECK" ] || [ "$CHECK" = "null" ] && echo -e "${RED}[FAIL] Create email${NC}" && return 1
     echo -e "${GREEN}[OK] $EMAIL${NC}"
-    sleep 1
 
     retry=0
-    MAIL_TOKEN=""
     while [ $retry -lt 3 ]; do
         MAIL_TOKEN=$(curl -s --max-time 10 -X POST https://api.mail.tm/token \
             -H "Content-Type: application/json" \
             -d "{\"address\":\"$EMAIL\",\"password\":\"$MPASS\"}" 2>/dev/null \
             | jq -r '.token // empty' 2>/dev/null)
-        if [ -n "$MAIL_TOKEN" ] && [ "$MAIL_TOKEN" != "null" ] && [ ${#MAIL_TOKEN} -gt 20 ]; then
-            echo -e "${GREEN}[OK] Token cached${NC}"
-            return 0
-        fi
+        [ -n "$MAIL_TOKEN" ] && [ "$MAIL_TOKEN" != "null" ] && [ ${#MAIL_TOKEN} -gt 20 ] && \
+            { echo -e "${GREEN}[OK] Token${NC}"; return 0; }
         retry=$((retry+1))
         sleep 2
     done
@@ -288,35 +245,26 @@ create_mail() {
 }
 
 get_otp() {
-    local TOKEN="$MAIL_TOKEN"
-    [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ] && echo "FAILED" && return 1
-
+    [ -z "$MAIL_TOKEN" ] || [ "$MAIL_TOKEN" = "null" ] && echo "FAILED" && return 1
     echo -e "${CYAN}[*] Waiting OTP...${NC}" >&2
 
     local attempt=0
     while [ $attempt -lt 50 ]; do
         attempt=$((attempt+1))
-        [ $((attempt%5)) -eq 0 ] && echo -e "  ${CYAN}⏳ ($attempt/50)...${NC}" >&2
+        [ $((attempt%5)) -eq 0 ] && echo -e "  ${CYAN}⏳ ($attempt/50)${NC}" >&2
 
-        local MSGS=$(curl -s --max-time 10 \
-            -H "Authorization: Bearer $TOKEN" \
-            https://api.mail.tm/messages 2>/dev/null)
+        MSGS=$(curl -s --max-time 10 -H "Authorization: Bearer $MAIL_TOKEN" https://api.mail.tm/messages 2>/dev/null)
         [ -z "$MSGS" ] && sleep 3 && continue
 
-        local TOTAL=$(echo "$MSGS" | jq -r '.["hydra:totalItems"] // 0' 2>/dev/null)
-        [ "$TOTAL" = "0" ] || [ -z "$TOTAL" ] || [ "$TOTAL" = "null" ] && sleep 3 && continue
+        TOTAL=$(echo "$MSGS" | jq -r '.["hydra:totalItems"] // 0' 2>/dev/null)
+        [ "$TOTAL" = "0" ] || [ -z "$TOTAL" ] && sleep 3 && continue
 
-        local MSG_ID=$(echo "$MSGS" | jq -r '.["hydra:member"] | sort_by(.createdAt) | reverse | .[0].id // empty' 2>/dev/null)
-        [ -z "$MSG_ID" ] || [ "$MSG_ID" = "null" ] && sleep 3 && continue
+        MSG_ID=$(echo "$MSGS" | jq -r '.["hydra:member"] | sort_by(.createdAt) | reverse | .[0].id // empty' 2>/dev/null)
+        [ -z "$MSG_ID" ] && sleep 3 && continue
 
-        local FULL=$(curl -s --max-time 10 \
-            -H "Authorization: Bearer $TOKEN" \
-            "https://api.mail.tm/messages/$MSG_ID" 2>/dev/null)
-        [ -z "$FULL" ] && sleep 3 && continue
-
-        local F_TXT=$(echo "$FULL" | jq -r '.text // ""' 2>/dev/null)
-        local OTP=$(echo "$F_TXT" | grep -oE '\b[0-9]{4,6}\b' | head -1)
-        OTP=$(echo "$OTP" | tr -d '\r\n\t ')
+        FULL=$(curl -s --max-time 10 -H "Authorization: Bearer $MAIL_TOKEN" "https://api.mail.tm/messages/$MSG_ID" 2>/dev/null)
+        F_TXT=$(echo "$FULL" | jq -r '.text // ""' 2>/dev/null)
+        OTP=$(echo "$F_TXT" | grep -oE '\b[0-9]{4,6}\b' | head -1 | tr -d '\r\n\t ')
 
         if [[ "$OTP" =~ ^[0-9]{4,6}$ ]]; then
             echo -e "  ${GREEN}✅ OTP: $OTP${NC}" >&2
@@ -349,10 +297,7 @@ run_one() {
 
     OTP=$(get_otp)
     OTP=$(echo "$OTP" | tr -d '\r\n\t ')
-    if [[ ! "$OTP" =~ ^[0-9]{4,6}$ ]]; then
-        echo -e "${RED}[FAIL] Bad OTP: [$OTP]${NC}"
-        return 1
-    fi
+    [[ ! "$OTP" =~ ^[0-9]{4,6}$ ]] && echo -e "${RED}[FAIL] Bad OTP${NC}" && return 1
 
     tap 258 556 "OTP field"; sleep 0.5
     for (( i=0; i<${#OTP}; i++ )); do
@@ -374,38 +319,35 @@ run_one() {
     tap 548 686 "REDEEM"; sleep 3
 
     echo "$(date '+%Y-%m-%d %H:%M:%S') | $EMAIL" >> ~/success.txt
-    echo -e "${GREEN}[OK] Run completed${NC}"
+    echo -e "${GREEN}[OK] Completed${NC}"
     return 0
 }
 
 # ================== Main ==================
 clear
-echo -e "${GREEN}╔════════ POLLO FARM v3.1 ════════╗${NC}"
-echo -e "${GREEN}║ SSH: ${SSH_HOST}:${SSH_PORT}           ║${NC}"
-echo -e "${GREEN}║ ADB: ${SERIAL}                       ║${NC}"
-echo -e "${GREEN}╚═══════════════════════════════════╝${NC}"
+echo -e "${GREEN}╔════════ POLLO FARM v3.2 ════════╗${NC}"
+echo -e "${GREEN}║ SSH: ${SSH_HOST}:${SSH_PORT}${NC}"
+echo -e "${GREEN}║ ADB: ${SERIAL}${NC}"
+echo -e "${GREEN}╚═════════════════════════════════╝${NC}"
 
 install_deps
 kill_tunnel
 start_tunnel || exit 1
 connect_adb || exit 1
-install_apk || exit 1    # ← THÊM DÒNG NÀY
+install_apk || exit 1
 
 echo -e "\n${GREEN}[🚀] Starting farm...${NC}\n"
 COUNT=1 OK=0 FAIL=0
 
 while true; do
-    if run_one $COUNT; then
+    if run_one; then
         OK=$((OK+1))
         COUNT=$((COUNT+1))
         echo -e "${GREEN}📊 OK:$OK FAIL:$FAIL${NC}"
     else
         FAIL=$((FAIL+1))
-        echo -e "${YELLOW}📊 OK:$OK FAIL:$FAIL | Wait 15s...${NC}"
+        echo -e "${YELLOW}📊 OK:$OK FAIL:$FAIL | Wait 15s${NC}"
         sleep 15
     fi
     sleep 5
 done
-EOF
-
-bash ~/pollo_farm.sh
